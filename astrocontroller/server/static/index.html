@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AstroController</title>
+<link rel="stylesheet" href="/static/style.css">
+<!-- uPlot is vendored rather than loaded from a CDN: an observatory PC is
+     often offline, and the dashboard has to work anyway. -->
+<link rel="stylesheet" href="/static/uplot.min.css">
+<script src="/static/uplot.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot" id="conn-dot"></span>
+    <strong>AstroController</strong>
+  </div>
+  <div class="topbar-stats">
+    <span class="stat"><label>RMS</label><b id="hdr-rms">–</b></span>
+    <span class="stat"><label>PHD2</label><b id="hdr-phd2">–</b></span>
+    <span class="stat"><label>Seq</label><b id="hdr-seq">–</b></span>
+  </div>
+  <div class="topbar-actions">
+    <button id="night-toggle" class="ghost" title="Night vision mode">🔴</button>
+  </div>
+</header>
+
+<main class="grid">
+
+  <!-- Sequence ------------------------------------------------------->
+  <section class="panel" id="panel-sequence">
+    <h2>Sequence
+      <span class="pill" id="seq-progress">–</span>
+    </h2>
+    <div class="current-step" id="seq-current">No sequence loaded</div>
+    <div class="controls">
+      <button data-seq="start" class="go">Start</button>
+      <button data-seq="stop" class="danger" data-confirm="Stop the running sequence?">Stop</button>
+      <button data-seq="skip" data-confirm="Skip the current instruction?">Skip</button>
+      <button data-seq="reset" data-confirm="Reset sequence progress?">Reset</button>
+    </div>
+    <div class="tree" id="seq-tree"></div>
+  </section>
+
+  <!-- Guiding -------------------------------------------------------->
+  <section class="panel" id="panel-guiding">
+    <h2>Guiding
+      <span class="pill" id="guide-state">–</span>
+    </h2>
+    <div class="rms-row">
+      <div class="rms-big"><b id="rms-total">–</b><label>total ″</label></div>
+      <div class="rms-small"><b id="rms-ra">–</b><label>RA ″</label></div>
+      <div class="rms-small"><b id="rms-dec">–</b><label>Dec ″</label></div>
+      <div class="rms-small"><b id="guide-snr">–</b><label>SNR</label></div>
+    </div>
+    <div id="guide-chart" class="chart"></div>
+    <div class="banner" id="guide-disturbed" hidden></div>
+    <div class="controls">
+      <button data-guide="start" class="go">Guide</button>
+      <button data-guide="stop" class="danger" data-confirm="Stop guiding and capture?">Stop</button>
+      <button data-guide="dither">Dither</button>
+      <button data-guide="pause">Pause</button>
+      <button data-guide="clear-calibration" class="danger"
+              data-confirm="Clear the guiding calibration? PHD2 will need to recalibrate.">Clear cal</button>
+    </div>
+    <table class="params" id="guide-params"></table>
+  </section>
+
+  <!-- Advisor -------------------------------------------------------->
+  <section class="panel" id="panel-advisor">
+    <h2>Advisor
+      <span class="pill" id="advisor-mode">–</span>
+    </h2>
+    <div class="switch-row">
+      <label class="switch">
+        <input type="checkbox" id="tuning-enabled">
+        <span>Auto-apply guiding changes</span>
+      </label>
+      <select id="tuning-mode" class="mini">
+        <option value="off">Off</option>
+        <option value="suggest">Suggest only</option>
+        <option value="auto">Auto</option>
+      </select>
+    </div>
+    <div class="advice" id="advisor-last">Waiting for the first tick…</div>
+    <div class="controls">
+      <button id="revert-last" data-confirm="Revert the most recent parameter change?">Revert last</button>
+      <button id="revert-all" class="danger"
+              data-confirm="Restore every guiding parameter to its value at session start?">Revert all</button>
+    </div>
+    <div class="subhead">Changes this session</div>
+    <div class="changes" id="advisor-changes"><div class="muted">None yet.</div></div>
+    <div class="subhead">Recent refusals</div>
+    <div class="vetoes" id="advisor-vetoes"><div class="muted">None.</div></div>
+  </section>
+
+  <!-- Last image ----------------------------------------------------->
+  <section class="panel" id="panel-image">
+    <h2>Last frame</h2>
+    <div class="frame-head" id="frame-head">No frames yet</div>
+    <div class="frame-flags" id="frame-flags"></div>
+    <table class="kv" id="frame-stats"></table>
+    <div class="subhead">Recent frames</div>
+    <div class="frames" id="frame-list"></div>
+  </section>
+
+  <!-- Weather -------------------------------------------------------->
+  <section class="panel" id="panel-weather">
+    <h2>Weather &amp; sky</h2>
+    <div class="weather-now" id="weather-now">Waiting for forecast…</div>
+    <div class="risks" id="weather-risks"></div>
+    <div id="cloud-chart" class="chart small"></div>
+    <div class="moon" id="moon-info"></div>
+  </section>
+
+  <!-- Polar alignment ------------------------------------------------>
+  <section class="panel" id="panel-tppa">
+    <h2>Polar alignment</h2>
+    <div class="muted small">
+      Uses the TPPA plugin in NINA. The panel stays idle if it is not installed.
+    </div>
+    <div class="pa-errors">
+      <div><b id="pa-az">–</b><label>azimuth ′</label></div>
+      <div><b id="pa-alt">–</b><label>altitude ′</label></div>
+      <div><b id="pa-total">–</b><label>total ′</label></div>
+    </div>
+    <div class="progress"><div id="pa-bar"></div></div>
+    <div class="advice" id="pa-status">Idle</div>
+    <div class="controls">
+      <button id="pa-start" class="go">Start</button>
+      <button id="pa-stop" class="danger">Stop</button>
+    </div>
+  </section>
+
+  <!-- Health --------------------------------------------------------->
+  <section class="panel" id="panel-health">
+    <h2>Connections</h2>
+    <div class="health" id="health-list"></div>
+    <div class="subhead">Learning store</div>
+    <div class="health" id="store-stats"></div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astrocontroller"
+version = "0.1.0"
+description = "Remote monitoring, control and autonomous guiding-parameter tuning for a N.I.N.A. + PHD2 astrophotography rig"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "httpx>=0.27",
+    "websockets>=13.0",
+    "pydantic>=2.9",
+]
+
+[project.optional-dependencies]
+# Deep FITS analysis via the in-house astro-eval engine (optional: only used
+# when [images].share_path points at a readable copy of NINA's image directory).
+fits = ["astro-eval"]
+# LLM providers. Ollama and OpenRouter both speak the OpenAI-compatible API.
+llm = ["openai>=1.0"]
+anthropic = ["anthropic>=0.40"]
+# Moon phase / altitude / separation.
+sky = ["astropy>=6.0"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+astrocontroller = "astrocontroller.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["astrocontroller*"]
+
+[tool.setuptools.package-data]
+astrocontroller = ["server/static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.uv.sources]
+astro-eval = { path = "../AstroSubQualityEvaluation", editable = true }

@@ -1,0 +1,181 @@
+# AstroController configuration.
+#
+# Copy to `astrocontroller.toml` and edit. Every key below is optional and
+# shown with its built-in default; unknown keys are rejected at startup so a
+# typo fails loudly instead of silently reverting a setting at 2am.
+#
+# Search order: --config, the working directory, the project root,
+# %APPDATA%\AstroController\astrocontroller.toml
+
+[server]
+# Bind address for the dashboard.
+#   "127.0.0.1"  this machine only (default)
+#   "0.0.0.0"    reachable from your phone on the LAN -- REQUIRES a token
+#
+# Neither NINA's API nor PHD2 has any authentication, and this UI can stop a
+# running sequence, so AstroController is the only place a check can happen.
+# Binding anywhere but loopback without a token is refused at startup.
+host = "127.0.0.1"
+port = 3005
+token_env = "ASTROCONTROLLER_TOKEN"
+
+[nina]
+# The machine running N.I.N.A. with the "Advanced API" plugin installed.
+host = "127.0.0.1"
+port = 1888
+timeout_s = 10.0
+# Sequence progress is polled: NINA emits no per-step websocket event.
+poll_interval_s = 10.0
+
+[phd2]
+# PHD2's event server. Enable it once via Tools > "Enable Server".
+# The port is 4400 + instance - 1.
+host = "127.0.0.1"
+instance = 1
+rpc_timeout_s = 10.0
+connect_timeout_s = 5.0
+
+[site]
+# Observing site for weather and moon. Omit to read it from NINA's profile.
+# latitude = 45.5
+# longitude = -73.6
+# elevation_m = 50.0
+
+[images]
+# Optional path to a readable copy of NINA's image directory (e.g. an SMB
+# share). When set, deep FITS analysis via astro-eval becomes available.
+# Leave empty -- the normal case for a separate-machine deployment -- and
+# NINA's own per-frame statistics are used instead, which already cover
+# saturation, transparency loss and tracking quality.
+share_path = ""
+max_analysis_seconds = 30.0
+
+[weather]
+enabled = true
+poll_interval_s = 900
+forecast_days = 2
+
+[llm]
+# "provider/model-id". Providers: ollama, openrouter, openai, anthropic.
+# OpenRouter ids contain their own slash and are passed through intact.
+model = "ollama/llama3.1:8b"
+# model = "openrouter/anthropic/claude-sonnet-5"
+ollama_url = "http://localhost:11434"
+max_tokens = 1500
+timeout_s = 120.0
+# "small" trims the retrieved history for 7-8B local models; "large" for cloud.
+context_profile = "small"
+# Cost and latency guard.
+min_seconds_between_calls = 600.0
+
+[tuning]
+# "off"     -- the advisor does not run at all
+# "suggest" -- proposals appear in the UI but are never applied (default)
+# "auto"    -- guarded auto-apply, still gated by `enabled` below
+mode = "suggest"
+
+# Global kill switch, also toggleable from the UI. Defaults to off: run a few
+# nights in "suggest" and read what it would have done before arming it.
+enabled = false
+
+tick_interval_s = 60.0
+max_changes_per_hour = 4
+max_changes_per_session = 12
+
+# Before/after measurement windows for judging a change.
+before_window_s = 300.0
+after_window_s = 300.0
+settle_lag_s = 30.0
+min_samples = 30
+min_stable_s = 180.0
+
+# Telemetry discarded after each disturbance, in seconds.
+settle_guard_s = 5.0
+dither_guard_s = 30.0
+flip_guard_s = 300.0
+star_lost_guard_s = 60.0
+global_cooldown_s = 300.0
+
+# Evidence thresholds. Guiding RMS wanders 10-20% on its own, so a difference
+# smaller than this many combined standard errors is called "neutral".
+min_effect_sigma = 1.5
+# Fractional change in guide-star HFD that marks a trial confounded: the sky
+# changed, not the parameter, so it is excluded from learning.
+hfd_confound_ratio = 0.20
+# Auto-revert when the after-window is this much worse than the before-window.
+auto_revert_ratio = 0.15
+
+# Learning and exploration.
+min_prior_support = 3.0
+epoch_min_seconds = 300.0
+epoch_max_seconds = 1800.0
+explore_base_probability = 0.30
+explore_decay_trials = 8.0
+target_rms_arcsec = 0.60
+actionable_rms_ratio = 1.15
+
+# Tunable parameters. These are hard limits: the model cannot exceed them, and
+# a proposal far outside a range is rejected rather than clamped, because that
+# signals a malfunction rather than a preference.
+#
+# `lo_arcsec` / `hi_arcsec` override lo/hi using the guide camera's pixel
+# scale, which keeps minMove limits meaningful on any focal length.
+#
+# `fastSwitch` and the Dec guide mode are deliberately absent: those stay
+# user-only.
+
+[[tuning.bounds]]
+axis = "ra"
+param = "aggression"
+lo = 0.40
+hi = 1.00
+max_delta = 0.10
+quantum = 0.05
+cooldown_s = 600.0
+
+[[tuning.bounds]]
+axis = "ra"
+param = "hysteresis"
+lo = 0.00
+hi = 0.30
+max_delta = 0.05
+quantum = 0.05
+cooldown_s = 600.0
+
+[[tuning.bounds]]
+axis = "ra"
+param = "minMove"
+lo = 0.05
+hi = 0.50
+max_delta = 0.05
+quantum = 0.01
+cooldown_s = 600.0
+lo_arcsec = 0.10
+hi_arcsec = 0.70
+
+[[tuning.bounds]]
+axis = "dec"
+param = "aggression"
+lo = 0.40
+hi = 1.00
+max_delta = 0.10
+quantum = 0.05
+cooldown_s = 600.0
+
+[[tuning.bounds]]
+axis = "dec"
+param = "minMove"
+lo = 0.05
+hi = 0.50
+max_delta = 0.05
+quantum = 0.01
+cooldown_s = 600.0
+lo_arcsec = 0.10
+hi_arcsec = 0.70
+
+[storage]
+db_path = "astrocontroller.db"
+# Raw guide steps are never persisted: 10-20k rows a night that no query ever
+# needs. Epochs and parameter changes are the durable evidence.
+keep_raw_guidesteps = false
+prune_conditions_after_days = 730

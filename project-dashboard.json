@@ -1,0 +1,12 @@
+{
+  "name": "AstroController",
+  "services": [
+    {
+      "name": "Web",
+      "type": "FastAPI",
+      "port": 3005,
+      "command": "uv run astrocontroller --host 0.0.0.0 --port 3005",
+      "cwd": "."
+    }
+  ]
+}
