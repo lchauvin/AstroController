@@ -59,6 +59,7 @@ class TelemetryHub:
             "sequence": {"available": False, "steps": []},
             "guiding": {},
             "frames": [],
+            "preview": {"available": False, "source": None},
             "weather": {},
             "sky": {},
             "advisor": {

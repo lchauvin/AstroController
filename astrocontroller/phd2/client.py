@@ -495,6 +495,20 @@ class Phd2Client:
     async def get_app_state(self) -> str:
         return str(await self.call("get_app_state"))
 
+    async def get_star_image(self, size: int = 15) -> dict:
+        """
+        The guide camera's crop around the current star.
+
+        PHD2 returns ``{frame, width, height, star_pos, pixels}`` where
+        ``pixels`` is base64 little-endian uint16. It errors when nothing is
+        selected or the camera is not looping, which is a normal state and not
+        worth logging -- callers surface it as "no star".
+        """
+        result = await self.call("get_star_image", {"size": max(15, int(size))})
+        if not isinstance(result, dict):
+            raise Phd2Error("get_star_image", 0, "unexpected response shape")
+        return result
+
     async def get_algo_param_names(self, axis: str) -> tuple[str, ...]:
         names = await self.call("get_algo_param_names", [axis])
         return tuple(names or ())

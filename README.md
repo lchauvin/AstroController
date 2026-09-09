@@ -20,13 +20,16 @@ Designed to run on a **separate machine on the LAN** from the observatory PC.
 
 ## What it does
 
-**Monitor** — the NINA sequence tree with the running step highlighted;
-per-frame HFR, star count, saturation and cloud flags; live PHD2 guiding in
-arcseconds; weather and moon for the night; connection health for everything.
+**Monitor** — the last captured frame, stretched and served from the image
+share; PHD2's crop of the guide star itself; the NINA sequence tree with the
+running step highlighted; per-frame HFR, star count, saturation and cloud
+flags; live PHD2 guiding in arcseconds; every piece of connected equipment with
+its state; weather and moon for the night.
 
 **Control** — start/stop/skip/reset the sequence; start/stop/dither/pause
 guiding, clear calibration, edit guiding parameters by hand; run polar
-alignment with live azimuth/altitude error.
+alignment with live azimuth/altitude error; edit the configuration from the
+Settings page without touching the file.
 
 **Advise and adjust** — every minute the advisor decides whether the guiding
 parameters are worth changing, and if so applies exactly one change inside
@@ -45,6 +48,10 @@ On the observatory PC:
 - **PHD2** with **Tools → Enable Server** switched on. Port 4400.
 - Optional: the **TPPA** plugin (≥ 2.2.4.1) for the polar alignment panel.
   Without it that panel simply stays idle.
+
+Optional but worth having: a readable copy of NINA's image folder — an SMB
+share is fine — set as `[images].share_path`. That is where the frame preview
+comes from; without it the preview falls back to NINA's own in-memory JPEG.
 
 On this machine: Python 3.12 (provisioned automatically by `uv`).
 
@@ -89,11 +96,19 @@ uv run astrocontroller --fake
 ```
 
 This runs a simulated NINA and PHD2 in-process: guide steps with drifting
-seeing and periodic error, dithers, occasional star loss, a live sequence, and
-image statistics. The simulated mount responds to the guiding parameters, so
-the advisor has something real to react to. Use it to explore the UI in
-daylight — and to reproduce timing and reconnection behaviour, which is
-miserable to debug at 2am in a field.
+seeing and periodic error, dithers, occasional star loss, a live sequence,
+image statistics, a deliberately mixed bag of connected and disconnected
+equipment, a guide star that widens as the seeing does — and real FITS frames
+written to a temporary share, so the whole preview path is exercised rather
+than mocked. The simulated mount responds to the guiding parameters, so the
+advisor has something real to react to. Use it to explore the UI in daylight —
+and to reproduce timing and reconnection behaviour, which is miserable to debug
+at 2am in a field.
+
+Simulation rewrites the host and port fields to point at the in-process fakes,
+so the Settings page is read-only under `--fake`: saving those values back
+would replace your observatory's addresses with a loopback port belonging to a
+process that has since exited.
 
 ## How the tuning works
 
@@ -176,12 +191,12 @@ Install the optional extras you need:
 ```powershell
 uv sync --extra llm        # ollama / openrouter / openai
 uv sync --extra anthropic
-uv sync --extra sky        # precise moon altitude and separation
+uv sync --extra sky        # FITS frame preview, precise moon altitude
 uv sync --extra fits       # deep FITS analysis, needs [images].share_path
 ```
 
-Without the `sky` extra the moon phase falls back to a low-precision
-calculation and the panel says so.
+Without the `sky` extra (astropy) the moon phase falls back to a low-precision
+calculation and says so, and the frame preview falls back to NINA's own JPEG.
 
 ## Suggested rollout
 
@@ -220,5 +235,32 @@ astrocontroller/
   weather/           Open-Meteo forecast, locally computed moon
   learning/          SQLite store, retrieval, deterministic baseline
   advisor/           guardrails, actuator, LLM providers, prompt, policy
+  imaging/           FITS -> stretched PNG, PHD2 star crops, a PNG encoder
+  settings.py        the Settings page as data; comment-preserving TOML patcher
   server/            FastAPI app + vanilla-JS UI (no build step)
+    static/js/       ES modules: core, charts, panels, imaging, settings, main
 ```
+
+## The interface
+
+Five pages, one live stream behind all of them.
+
+| Page | What it is for |
+|---|---|
+| **Dashboard** | The one screen to leave open: six stat tiles, the last frame, the guide trace, every device's connection state, sequence progress, weather, advisor. |
+| **Imaging** | The frame viewer, with brightness / white-point / invert controls that re-stretch server-side, plus frame statistics, the HFR trend and recent frames. |
+| **Guiding** | RMS tiles, the full-width guide trace, PHD2's guide-star crop magnified, the parameter table, and the advisor's changes and refusals. |
+| **Sequence** | The step tree with the running step highlighted, sequence controls, polar alignment. |
+| **Settings** | Connections, site, image share, weather, advisor and model settings — written back to `astrocontroller.toml` with your comments intact. Plus task health and the learning store. |
+
+The night-vision toggle in the top bar shifts everything to red. It also
+destroys every colour distinction the palette makes, which is why nothing in
+the UI signals state by colour alone: a device row carries "on"/"off" in words
+beside its dot, and every chart names its series in a legend.
+
+Two things about the images. The frame preview reads the newest FITS off
+`[images].share_path`, bins it down, applies a midtone-transfer autostretch and
+sends a PNG — the rendering happens on request, so a dashboard nobody has open
+costs one directory listing every few seconds. The guide star comes from PHD2's
+`get_star_image` and is polled only while the Guiding page is actually on
+screen, because that call shares a socket with the guide steps.

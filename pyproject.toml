@@ -22,7 +22,8 @@ fits = ["astro-eval"]
 # LLM providers. Ollama and OpenRouter both speak the OpenAI-compatible API.
 llm = ["openai>=1.0"]
 anthropic = ["anthropic>=0.40"]
-# Moon phase / altitude / separation.
+# Moon phase / altitude / separation, and reading FITS off the image share
+# for the live frame preview.
 sky = ["astropy>=6.0"]
 
 [dependency-groups]
@@ -35,7 +36,7 @@ astrocontroller = "astrocontroller.__main__:main"
 include = ["astrocontroller*"]
 
 [tool.setuptools.package-data]
-astrocontroller = ["server/static/*"]
+astrocontroller = ["server/static/*", "server/static/js/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

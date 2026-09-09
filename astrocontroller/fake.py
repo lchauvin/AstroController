@@ -16,13 +16,17 @@ something real to react to and makes the exclusion masking observable.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import math
 import random
+import shutil
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 # Imported at module scope on purpose. This module uses
@@ -134,6 +138,148 @@ class SimState:
         return (error - correction) * (1 - self.hysteresis * 0.25)
 
 
+def _synthetic_star(sim: "SimState", size: int) -> Optional[dict]:
+    """
+    A Gaussian star on noise, in PHD2's `get_star_image` wire format.
+
+    Its width follows the simulated seeing and it wanders with the guide error,
+    so the guide-star panel shows the same story as the RMS numbers instead of
+    a static placeholder.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    if sim.app_state not in ("Guiding", "Looping", "Paused"):
+        return None
+
+    hfd_px = sim.seeing_arcsec / sim.pixel_scale
+    sigma = max(0.9, hfd_px / 2.355)
+    centre = (size - 1) / 2.0
+    x0 = centre + max(-3.0, min(3.0, sim._ra_error / sim.pixel_scale))
+    y0 = centre + max(-3.0, min(3.0, sim._dec_error / sim.pixel_scale))
+
+    ys, xs = np.mgrid[0:size, 0:size]
+    peak = 22000.0 * max(0.15, min(1.0, 2.6 / sim.seeing_arcsec))
+    star = peak * np.exp(-(((xs - x0) ** 2 + (ys - y0) ** 2) / (2 * sigma**2)))
+    frame = 900.0 + star + np.random.normal(0, 55.0, (size, size))
+    pixels = np.clip(frame, 0, 65535).astype("<u2")
+
+    return {
+        "frame": sim.frame,
+        "width": size,
+        "height": size,
+        "star_pos": [round(float(x0), 2), round(float(y0), 2)],
+        "pixels": base64.b64encode(pixels.tobytes()).decode("ascii"),
+    }
+
+
+class FakeImageShare:
+    """
+    Writes real FITS files into a temp directory, as NINA's share would.
+
+    Simulating the *event* but not the file would leave the whole preview path
+    -- directory scan, FITS read, debayer, stretch, PNG -- untested in the one
+    mode where it is easy to test. The frames are small and the directory is
+    removed on exit.
+    """
+
+    KEEP = 6
+
+    def __init__(self, sim: SimState) -> None:
+        self.sim = sim
+        self.path: Optional[str] = None
+        self._index = 0
+
+    def start(self) -> Optional[str]:
+        try:
+            import numpy  # noqa: F401
+            from astropy.io import fits  # noqa: F401
+        except ImportError:
+            log.info("no numpy/astropy: the simulated image share is disabled")
+            return None
+        self.path = tempfile.mkdtemp(prefix="astrocontroller-fake-share-")
+        log.info("simulated image share at %s", self.path)
+        self.write_frame()
+        return self.path
+
+    def write_frame(self) -> None:
+        if self.path is None:
+            return
+        try:
+            import numpy as np
+            from astropy.io import fits
+        except ImportError:  # pragma: no cover - checked in start()
+            return
+
+        self._index += 1
+        height, width = 900, 1200
+        rng = np.random.default_rng(1234)  # same starfield every frame
+
+        ys, xs = np.mgrid[0:height, 0:width].astype(np.float32)
+        # Sky gradient plus a soft nebula, so the stretch has something to do.
+        image = 900.0 + 90.0 * (xs / width) + 60.0 * (ys / height)
+        image += 260.0 * np.exp(
+            -(((xs - width * 0.62) ** 2) / 90000.0 + ((ys - height * 0.45) ** 2) / 42000.0)
+        )
+
+        count = 380
+        star_x = rng.uniform(0, width, count)
+        star_y = rng.uniform(0, height, count)
+        brightness = rng.pareto(1.4, count) * 900.0 + 300.0
+        # Seeing sets the star width; drift smears them along RA when guiding
+        # is poor, which is the whole point of looking at the frame.
+        sigma = max(1.1, self.sim.seeing_arcsec * 0.9)
+        smear = min(4.0, abs(self.sim._ra_error) * 0.8)
+        for x0, y0, peak in zip(star_x, star_y, brightness):
+            lo_x, hi_x = int(max(0, x0 - 14)), int(min(width, x0 + 15))
+            lo_y, hi_y = int(max(0, y0 - 14)), int(min(height, y0 + 15))
+            if hi_x <= lo_x or hi_y <= lo_y:
+                continue
+            dx = xs[lo_y:hi_y, lo_x:hi_x] - x0
+            dy = ys[lo_y:hi_y, lo_x:hi_x] - y0
+            image[lo_y:hi_y, lo_x:hi_x] += peak * np.exp(
+                -(dx**2 / (2 * (sigma + smear) ** 2) + dy**2 / (2 * sigma**2))
+            )
+
+        image += rng.normal(0, 22.0, (height, width))
+        data = np.clip(image, 0, 65535).astype(np.uint16)
+
+        header = fits.Header()
+        header["IMAGETYP"] = "LIGHT"
+        header["OBJECT"] = self.sim.target
+        header["FILTER"] = self.sim.filter
+        header["EXPOSURE"] = 300.0
+        header["GAIN"] = 100
+        header["OFFSET"] = 50
+        header["CCD-TEMP"] = -10.0
+        header["XBINNING"] = 1
+        header["INSTRUME"] = "Sim ASI2600"
+        header["TELESCOP"] = "Sim RC8"
+        header["FOCALLEN"] = 1624.0
+        header["ROWORDER"] = "TOP-DOWN"
+        header["DATE-OBS"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        name = f"{stamp}_{self.sim.filter}_300.00s_{self._index:04d}.fits"
+        fits.PrimaryHDU(data=data, header=header).writeto(
+            Path(self.path) / name, overwrite=True
+        )
+        self._prune()
+
+    def _prune(self) -> None:
+        if self.path is None:
+            return
+        files = sorted(Path(self.path).glob("*.fits"), key=lambda p: p.stat().st_mtime)
+        for old in files[: -self.KEEP]:
+            old.unlink(missing_ok=True)
+
+    def cleanup(self) -> None:
+        if self.path:
+            shutil.rmtree(self.path, ignore_errors=True)
+            self.path = None
+
+
 class FakePhd2Server:
     """Speaks the real PHD2 wire protocol: JSON lines, CRLF, events + RPC."""
 
@@ -235,6 +381,17 @@ class FakePhd2Server:
             )
         elif method == "clear_calibration":
             result = 0
+        elif method == "get_star_image":
+            size = 15
+            if isinstance(params, dict):
+                size = int(params.get("size", 15))
+            elif params:
+                size = int(params[0])
+            image = _synthetic_star(sim, max(15, size))
+            if image is None:
+                return {"jsonrpc": "2.0", "id": req.get("id"),
+                        "error": {"code": 1, "message": "no star selected"}}
+            result = image
         else:
             return {"jsonrpc": "2.0", "id": req.get("id"),
                     "error": {"code": -32601, "message": f"unknown method {method}"}}
@@ -313,7 +470,7 @@ class FakePhd2Server:
         await writer.drain()
 
 
-def build_fake_nina_app(sim: SimState):
+def build_fake_nina_app(sim: SimState, share: Optional["FakeImageShare"] = None):
     """A FastAPI app mimicking the parts of the Advanced API we consume."""
 
     app = FastAPI(title="Fake NINA Advanced API")
@@ -398,15 +555,55 @@ def build_fake_nina_app(sim: SimState):
 
     @app.get("/v2/api/equipment/{device}/info")
     async def equipment(device: str):
+        # A deliberately mixed rig: most things up, the rotator plugged in but
+        # not connected, and several devices absent from the profile entirely.
+        # A dashboard that only ever sees a full row of green lights has not
+        # been tested against the case that matters.
+        absent = {"dome", "switch", "flatdevice", "weather"}
+        if device in absent:
+            return {
+                "Response": None,
+                "Error": f"{device} is not configured in this profile",
+                "StatusCode": 409,
+                "Success": False,
+                "Type": "API",
+            }
+        if device == "rotator":
+            return envelope({"Connected": False, "Name": "Sim Rotator"})
+
         base = {"Connected": True, "Name": f"Sim {device}"}
         if device == "mount":
             base.update({
-                "Altitude": sim.altitude, "Azimuth": sim.azimuth,
-                "SideOfPier": "pierWest", "HoursToMeridian": 1.4,
-                "TrackingEnabled": True,
+                "Name": "Simulated Mount", "Altitude": sim.altitude,
+                "Azimuth": sim.azimuth, "SideOfPier": "pierWest",
+                "TimeToMeridianFlip": 1.4, "TrackingEnabled": True,
+                "AtPark": False,
             })
         elif device == "camera":
-            base.update({"Temperature": -10.0, "CoolerOn": True})
+            base.update({
+                "Name": "Sim ASI2600", "Temperature": -10.0, "CoolerOn": True,
+                "CoolerPower": 43.0, "TemperatureSetPoint": -10.0,
+                "IsExposing": sim.app_state == "Guiding",
+            })
+        elif device == "focuser":
+            base.update({
+                "Name": "Sim EAF",
+                "Position": 18500 + int(20 * math.sin(time.monotonic() / 90)),
+                "Temperature": 6.4, "IsMoving": False,
+            })
+        elif device == "filterwheel":
+            base.update({
+                "Name": "Sim EFW",
+                "SelectedFilter": {"Name": sim.filter, "Id": 2},
+                "IsMoving": False,
+            })
+        elif device == "guider":
+            base.update({
+                "Name": "PHD2", "State": sim.app_state,
+                "RMSError": {"Total": {"Arcseconds": sim.seeing_arcsec * 0.3}},
+            })
+        elif device == "safetymonitor":
+            base.update({"Name": "Sim Safety", "IsSafe": True})
         return envelope(base)
 
     @app.get("/v2/api/equipment/guider/graph")
@@ -456,6 +653,10 @@ def build_fake_nina_app(sim: SimState):
         """Push an IMAGE-SAVE every so often, as a real session would."""
         while True:
             await asyncio.sleep(45)
+            if share is not None:
+                # Writing the FITS first mirrors reality: the file lands on the
+                # share, then NINA announces it.
+                await asyncio.to_thread(share.write_frame)
             payload = {
                 "Response": {"Event": "IMAGE-SAVE", "ImageStatistics": make_stats()},
                 "Success": True, "StatusCode": 200, "Type": "Socket",

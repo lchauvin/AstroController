@@ -43,10 +43,19 @@ connect_timeout_s = 5.0
 
 [images]
 # Optional path to a readable copy of NINA's image directory (e.g. an SMB
-# share). When set, deep FITS analysis via astro-eval becomes available.
-# Leave empty -- the normal case for a separate-machine deployment -- and
-# NINA's own per-frame statistics are used instead, which already cover
-# saturation, transparency loss and tracking quality.
+# share). Two things use it:
+#
+#   * the live frame preview -- the newest FITS is stretched and served to the
+#     browser. This is the better source: it survives a NINA restart and keeps
+#     working while the Advanced API is busy. Needs astropy (--extra sky).
+#   * deep FITS analysis via astro-eval (--extra fits).
+#
+# Leave empty and the preview falls back to NINA's own in-memory JPEG, and
+# frame quality falls back to NINA's per-frame statistics -- which already
+# cover saturation, transparency loss and tracking quality.
+#
+# Point this at the download/output folder, not at your whole image library:
+# it is scanned for the newest file every few seconds.
 share_path = ""
 max_analysis_seconds = 30.0
 

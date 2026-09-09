@@ -9,6 +9,7 @@ Task inventory, all supervised with backoff:
 * ``weather``    -- Open-Meteo plus locally computed moon
 * ``advisor``    -- the tuning tick
 * ``sampler``    -- one condition row per minute, plus epoch bookkeeping
+* ``preview``    -- notices new frames landing on the image share
 * ``coalescer``  -- rate-limits high-frequency SSE topics
 """
 
@@ -26,11 +27,14 @@ from .advisor.actuator import Actuator
 from .advisor.loop import Advisor
 from .config import Config
 from .hub import TelemetryHub
+from .imaging.preview import SharePreviewer
+from .imaging.preview import available as preview_available
 from .learning.store import EpochRecord, LearningStore, params_hash
 from .metrics.conditions import ConditionVector, bucket_key, build_condition_vector
 from .metrics.exclusions import ExclusionTracker
 from .metrics.guiding import GuideBuffer
 from .metrics.trials import TrialTracker
+from .nina.equipment import summarize as summarize_equipment
 from .nina.events import NinaEventListener, TppaSession
 from .nina.rest import ImageStats, NinaRest, NinaUnavailable
 from .nina.sequence import parse_sequence
@@ -110,6 +114,9 @@ class Runtime:
         if cfg.site.latitude is not None and cfg.site.longitude is not None:
             self.site = (cfg.site.latitude, cfg.site.longitude, cfg.site.elevation_m)
 
+        self.previewer = SharePreviewer(cfg.images.share_path)
+        self._preview_wake = asyncio.Event()
+
         self.epoch: Optional[Epoch] = None
         self.nina_flipping = False
         self.nina_autofocusing = False
@@ -139,6 +146,7 @@ class Runtime:
         )
         self.supervisor.spawn("advisor", self._run_advisor)
         self.supervisor.spawn("sampler", self._run_sampler)
+        self.supervisor.spawn("preview", self._watch_share)
         self.supervisor.spawn("coalescer", self.hub.run_coalescer)
 
     async def stop(self) -> None:
@@ -257,6 +265,7 @@ class Runtime:
                 self.store.add_frame(self.session_id, stats, flags.as_dict())
 
         self.hub.update("frames", self.recent_frames)
+        self._preview_wake.set()
         if flags.any_flag:
             log.info("frame flagged: %s", ", ".join(flags.notes) or "see flags")
 
@@ -284,7 +293,87 @@ class Runtime:
 
     async def _refresh_equipment(self) -> None:
         equipment = await self.rest.all_equipment()
-        self.hub.update("nina", {"connected": True, "equipment": equipment})
+        self.hub.update(
+            "nina",
+            {
+                "connected": True,
+                "equipment": equipment,
+                "devices": summarize_equipment(equipment),
+            },
+        )
+
+    # -- image share ----------------------------------------------------
+
+    async def _watch_share(self) -> None:
+        """
+        Notice new frames landing on the image share.
+
+        Only the *identity* of the newest file is polled here -- name, mtime,
+        size. Rendering happens on request in the HTTP handler, so a dashboard
+        nobody has open costs one directory listing every few seconds and no
+        network reads at all.
+
+        A scan is also kicked off by IMAGE-SAVE, because a frame that appears
+        one second after a poll should not wait for the next one.
+        """
+        reason = preview_available()
+        last: Optional[tuple] = None
+        while True:
+            self.previewer.share_path = self.config.images.share_path
+            share = self.previewer.share_path
+
+            found = None
+            if share and not reason:
+                found = await asyncio.to_thread(self.previewer.scan)
+
+            index = self.recent_frames[0].get("index") if self.recent_frames else None
+            identity = (share, found and found["path"], found and found["mtime"], index)
+            if identity != last:
+                last = identity
+                self.hub.update("preview", self._preview_payload(found, reason, index))
+
+            # Woken by IMAGE-SAVE; otherwise a slow poll, since a sub is
+            # minutes long and a directory listing over SMB is not free.
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._preview_wake.wait(), timeout=8.0)
+            self._preview_wake.clear()
+
+    def _preview_payload(
+        self, found: Optional[dict], reason: Optional[str], index: Optional[int]
+    ) -> dict:
+        """
+        What the browser needs to decide whether to re-fetch the frame.
+
+        `token` changes exactly when the image does, and is the whole
+        cache-busting story: the browser appends it to the image URL and its
+        own HTTP cache does the rest.
+        """
+        share = self.config.images.share_path
+        if found is not None:
+            return {
+                "source": "share",
+                "available": True,
+                "share_path": share,
+                "filename": found["filename"],
+                "path": found["path"],
+                "mtime": found["mtime"],
+                "size": found["size"],
+                "token": str(int(found["mtime"] * 1000)),
+                "nina_index": index,
+            }
+        return {
+            "source": "nina" if index is not None else None,
+            "available": index is not None,
+            "share_path": share,
+            "reason": reason
+            or (
+                f"no FITS files under {share}"
+                if share
+                else "no image share configured -- set it in Settings"
+            ),
+            "nina_index": index,
+            "token": str(index) if index is not None else None,
+        }
 
     async def _refresh_images(self) -> None:
         with contextlib.suppress(Exception):
@@ -303,6 +392,7 @@ class Runtime:
         del self.recent_frames[40:]
         self.last_frame = stats
         self.hub.update("frames", self.recent_frames)
+        self._preview_wake.set()
 
     async def _ensure_site(self) -> None:
         if self.site is not None:

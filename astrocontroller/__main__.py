@@ -157,7 +157,7 @@ def _run_fake(config: Config, log: logging.Logger) -> int:
 
     import uvicorn
 
-    from .fake import FakePhd2Server, SimState, build_fake_nina_app
+    from .fake import FakeImageShare, FakePhd2Server, SimState, build_fake_nina_app
     from .server.app import create_app
 
     async def run() -> None:
@@ -166,7 +166,14 @@ def _run_fake(config: Config, log: logging.Logger) -> int:
         phd2 = FakePhd2Server(sim)
         phd2_port = await phd2.start()
 
-        nina_app = build_fake_nina_app(sim)
+        # The simulated share replaces the configured one for the duration:
+        # --fake means "no real hardware", and a run that quietly showed last
+        # night's real frames would be a confusing thing to debug against.
+        share = FakeImageShare(sim)
+        simulated_share = await asyncio.to_thread(share.start)
+        config.images.share_path = simulated_share or ""
+
+        nina_app = build_fake_nina_app(sim, share)
         nina_config = uvicorn.Config(
             nina_app, host="127.0.0.1", port=0, log_config=None, access_log=False
         )
@@ -176,6 +183,7 @@ def _run_fake(config: Config, log: logging.Logger) -> int:
             await asyncio.sleep(0.05)
         nina_port = nina_server.servers[0].sockets[0].getsockname()[1]
 
+        config.simulated = True
         config.nina.host = "127.0.0.1"
         config.nina.port = nina_port
         config.phd2.host = "127.0.0.1"
@@ -222,6 +230,7 @@ def _run_fake(config: Config, log: logging.Logger) -> int:
             nina_server.should_exit = True
             await phd2.stop()
             nina_task.cancel()
+            share.cleanup()
 
     try:
         asyncio.run(run())

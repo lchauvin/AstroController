@@ -273,6 +273,14 @@ class Config:
     storage: StorageConfig = field(default_factory=StorageConfig)
     source_path: Optional[str] = None
     """Path the config was loaded from; None when running on defaults."""
+    simulated: bool = False
+    """
+    True under ``--fake``.
+
+    Simulation rewrites the host and port fields in place to point at the
+    in-process fakes, so what a running fake process holds is not what belongs
+    in the file. Anything that could write configuration back has to know.
+    """
 
     def bound_for(self, axis: str, param: str) -> Optional[ParamBound]:
         for b in self.tuning.bounds:

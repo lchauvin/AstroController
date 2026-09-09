@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import mimetypes
 import time
 import logging
 from pathlib import Path
@@ -22,16 +23,25 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ..config import Config, load_config
+from ..config import Config, ConfigError, load_config
 from ..hub import sse_format
+from ..imaging.preview import PreviewError, StretchOptions
+from ..imaging.star import StarImageError, render_star_png
 from ..nina.events import TppaSession
 from ..nina.rest import NinaError, NinaUnavailable
 from ..phd2.client import Phd2Disconnected, Phd2Error, Settle
 from ..runtime import Runtime
+from .. import settings as settings_module
 
 log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
+
+# Windows keeps script MIME types in the registry, where an old install can
+# leave .js mapped to text/plain. Browsers refuse to execute a module served
+# that way, and the failure looks like a blank page with no request errors.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 
 # ── request models ─────────────────────────────────────────────────────
@@ -54,6 +64,12 @@ class DitherRequest(BaseModel):
 class TuningUpdate(BaseModel):
     enabled: Optional[bool] = None
     mode: Optional[str] = Field(default=None, pattern="^(off|suggest|auto)$")
+
+
+class SettingsUpdate(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)
+    save: bool = True
+    """False applies the change to the running process without touching the file."""
 
 
 class TppaRequest(BaseModel):
@@ -354,6 +370,148 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return Response(content=data, media_type="image/jpeg")
 
+    @app.get("/api/frame/latest.png", dependencies=[Depends(require_auth)])
+    async def latest_frame(
+        width: int = Query(default=1400, ge=200, le=4000),
+        background: float = Query(default=0.18, ge=0.02, le=0.6),
+        white: float = Query(default=99.9, ge=90.0, le=100.0),
+        invert: bool = Query(default=False),
+        source: str = Query(default="auto", pattern="^(auto|share|nina)$"),
+        _v: str = Query(default="", alias="v"),
+    ) -> Response:
+        """
+        The newest saved frame, stretched for a browser.
+
+        Prefers the image share -- that is the frame as written to disk, and it
+        keeps working while NINA is busy -- and falls back to NINA's own
+        in-memory preview. `v` is ignored here: it exists so the browser's
+        cache keys on the frame's identity and a new sub actually reloads.
+        """
+        rt = runtime()
+        options = StretchOptions(
+            max_width=width,
+            target_background=background,
+            white_percentile=white,
+            invert=invert,
+        )
+
+        share_error: Optional[str] = None
+        if source in ("auto", "share") and rt.config.images.share_path:
+            rt.previewer.share_path = rt.config.images.share_path
+            try:
+                image = await asyncio.to_thread(rt.previewer.render_latest, options)
+            except PreviewError as exc:
+                share_error = str(exc)
+            except Exception as exc:  # noqa: BLE001 - a torn FITS must not 500
+                share_error = f"{type(exc).__name__}: {exc}"
+            else:
+                return Response(
+                    content=image.png,
+                    media_type="image/png",
+                    headers={
+                        "Cache-Control": "public, max-age=86400",
+                        "X-Frame-Source": "share",
+                        "X-Frame-Name": str(image.meta.get("filename") or ""),
+                    },
+                )
+        if source == "share":
+            raise HTTPException(status_code=404, detail=share_error or "no share frame")
+
+        index = rt.recent_frames[0].get("index") if rt.recent_frames else None
+        if index is None:
+            raise HTTPException(
+                status_code=404,
+                detail=share_error or "no frame has been captured yet",
+            )
+        try:
+            data = await rt.rest.image_bytes(int(index), scale=min(1.0, width / 3000))
+        except (NinaError, NinaUnavailable) as exc:
+            raise HTTPException(
+                status_code=502, detail=share_error or str(exc)
+            ) from exc
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400", "X-Frame-Source": "nina"},
+        )
+
+    @app.get("/api/guide-star.png", dependencies=[Depends(require_auth)])
+    async def guide_star(size: int = Query(default=31, ge=15, le=63)) -> Response:
+        """PHD2's crop around the star it is guiding on."""
+        rt = runtime()
+        try:
+            payload = await rt.phd2.get_star_image(size)
+            png, meta = await asyncio.to_thread(render_star_png, payload)
+        except (Phd2Error, Phd2Disconnected, asyncio.TimeoutError) as exc:
+            # "no star selected" is an ordinary state, not a server fault.
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except StarImageError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(
+            content=png,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Star-Pos": f"{meta.get('star_x')},{meta.get('star_y')}",
+                "X-Star-Peak": str(meta.get("peak")),
+            },
+        )
+
+    # ── settings ───────────────────────────────────────────────────────
+
+    @app.get("/api/settings", dependencies=[Depends(require_auth)])
+    async def get_settings() -> dict:
+        rt = app.state.runtime
+        described = settings_module.describe(app.state.config)
+        described["running"] = rt is not None
+        described["token_required"] = token is not None
+        return described
+
+    @app.post("/api/settings", dependencies=[Depends(require_auth)])
+    async def post_settings(body: SettingsUpdate) -> dict:
+        """
+        Apply a settings patch to the running process and, by default, the file.
+
+        The whole patch is validated before anything is mutated, so a rejected
+        value leaves both the process and the file exactly as they were.
+        """
+        if not body.values:
+            raise HTTPException(status_code=400, detail="no settings were supplied")
+
+        config = app.state.config
+        if config.simulated:
+            # Checked before `apply_to`, which would otherwise mutate the
+            # running config on its way to failing at the write.
+            raise HTTPException(
+                status_code=409,
+                detail="simulation mode (--fake): settings are read-only, because "
+                       "the connection fields point at the in-process simulator",
+            )
+        try:
+            coerced = settings_module.apply_to(config, body.values)
+        except ConfigError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        saved_to = None
+        if body.save:
+            try:
+                saved_to = str(settings_module.save(config, coerced))
+            except ConfigError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500, detail=f"could not write the config file: {exc}"
+                ) from exc
+
+        rt = app.state.runtime
+        if rt is not None:
+            _apply_live(rt, coerced)
+
+        result = settings_module.describe(config)
+        result["saved_to"] = saved_to
+        result["restart_required"] = settings_module.restart_required(list(coerced))
+        return result
+
     @app.get("/api/logs", dependencies=[Depends(require_auth)])
     async def logs(lines: int = Query(default=100, ge=1, le=1000),
                    level: str = Query(default="INFO")) -> dict:
@@ -372,6 +530,31 @@ def create_app(
             return FileResponse(STATIC / "index.html")
 
     return app
+
+
+def _apply_live(rt: Runtime, coerced: dict) -> None:
+    """
+    Push the settings that a running process can actually honour into it.
+
+    Everything else already sits in `rt.config` and will be picked up by
+    whichever loop reads it next; the caller tells the user which ones need a
+    restart instead.
+    """
+    if "images.share_path" in coerced:
+        rt.previewer.share_path = coerced["images.share_path"]
+        rt._preview_wake.set()
+    if "tuning.mode" in coerced:
+        rt.advisor.mode = coerced["tuning.mode"]
+    if "tuning.enabled" in coerced:
+        rt.advisor.enabled = coerced["tuning.enabled"]
+    if {"site.latitude", "site.longitude", "site.elevation_m"} & set(coerced):
+        site = rt.config.site
+        rt.site = (
+            (site.latitude, site.longitude, site.elevation_m)
+            if site.latitude is not None and site.longitude is not None
+            else None
+        )
+    rt.hub.update("advisor", rt.advisor.status())
 
 
 async def _phd2_call(awaitable) -> dict:

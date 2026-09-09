@@ -270,3 +270,73 @@ async def test_stream_exits_promptly_when_the_server_is_shutting_down():
 
 def test_should_stop_defaults_to_false():
     assert create_app(Config()).state.should_stop() is False
+
+
+# ── new surfaces: images and settings ──────────────────────────────────
+
+
+def test_image_and_settings_routes_exist(client):
+    paths = {r.path for r in client.app.routes if hasattr(r, "path")}
+    for path in ("/api/frame/latest.png", "/api/guide-star.png", "/api/settings"):
+        assert path in paths, f"missing route {path}"
+
+
+def test_frame_stretch_parameters_are_validated(client):
+    assert client.get("/api/frame/latest.png?width=10").status_code == 422
+    assert client.get("/api/frame/latest.png?background=5").status_code == 422
+    assert client.get("/api/frame/latest.png?white=50").status_code == 422
+    assert client.get("/api/frame/latest.png?source=elsewhere").status_code == 422
+
+
+def test_guide_star_size_is_constrained(client):
+    # PHD2 itself refuses anything under 15.
+    assert client.get("/api/guide-star.png?size=4").status_code == 422
+    assert client.get("/api/guide-star.png?size=999").status_code == 422
+
+
+def test_settings_are_described_without_a_running_runtime(client):
+    body = client.get("/api/settings").json()
+    assert body["running"] is False
+    groups = {g["key"] for g in body["groups"]}
+    assert {"connections", "advisor", "images"} <= groups
+
+
+def test_an_empty_settings_patch_is_rejected(client):
+    assert client.post("/api/settings", json={"values": {}}).status_code == 400
+
+
+def test_an_unknown_setting_is_rejected(client):
+    resp = client.post(
+        "/api/settings", json={"values": {"tuning.panic_rms_multiple": 9}, "save": False}
+    )
+    assert resp.status_code == 400
+    assert "not an editable setting" in resp.json()["detail"]
+
+
+def test_a_settings_patch_applies_to_the_running_config(client):
+    resp = client.post(
+        "/api/settings", json={"values": {"nina.host": "10.0.0.9"}, "save": False}
+    )
+    assert resp.status_code == 200
+    assert client.app.state.config.nina.host == "10.0.0.9"
+    assert resp.json()["restart_required"] == ["NINA host"]
+
+
+def test_a_simulated_config_refuses_settings_writes():
+    config = Config()
+    config.simulated = True
+    sim_client = TestClient(create_app(config))
+    resp = sim_client.post("/api/settings", json={"values": {"nina.host": "10.0.0.9"}})
+    assert resp.status_code == 409
+    # And nothing was applied on the way to refusing.
+    assert config.nina.host == "127.0.0.1"
+
+
+def test_settings_are_behind_the_token_too(monkeypatch):
+    monkeypatch.setenv("ASTROCONTROLLER_TOKEN", "s3cret")
+    config = Config()
+    config.server.host = "0.0.0.0"
+    guarded = TestClient(create_app(config))
+    assert guarded.get("/api/settings").status_code == 401
+    assert guarded.get("/api/frame/latest.png").status_code == 401
+    assert guarded.get("/api/guide-star.png").status_code == 401

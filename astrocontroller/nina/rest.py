@@ -13,11 +13,14 @@ why AstroController must stay inside the observatory LAN.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
 import httpx
+
+from .equipment import DEVICE_NAMES
 
 log = logging.getLogger(__name__)
 
@@ -244,18 +247,21 @@ class NinaRest:
         return await self._get(f"/equipment/{device}/info")
 
     async def all_equipment(self) -> dict[str, Any]:
-        """Best-effort snapshot; a missing device is reported, not fatal."""
-        devices = (
-            "camera", "mount", "focuser", "filterwheel",
-            "guider", "rotator", "weather", "safetymonitor", "flatdevice",
-        )
-        out: dict[str, Any] = {}
-        for name in devices:
+        """
+        Best-effort snapshot of every device; a missing one is reported, not fatal.
+
+        Issued concurrently: eleven round trips in series against a busy NINA
+        would not finish inside the poll interval, and a stalled focuser query
+        would hold up the camera's temperature.
+        """
+        async def one(name: str) -> tuple[str, Any]:
             try:
-                out[name] = await self.equipment_info(name)
+                return name, await self.equipment_info(name)
             except (NinaError, NinaUnavailable) as exc:
-                out[name] = {"Connected": False, "Error": str(exc)}
-        return out
+                return name, {"Connected": False, "Error": str(exc)}
+
+        results = await asyncio.gather(*(one(name) for name in DEVICE_NAMES))
+        return dict(results)
 
     async def guider_graph(self) -> Any:
         """NINA's own guider history -- a fallback when PHD2 is unreachable."""

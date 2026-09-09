@@ -1,6 +1,9 @@
 # Secrets and local config
 .env
 astrocontroller.toml
+# Written by the Settings page when it rewrites the config.
+astrocontroller.toml.bak
+astrocontroller.toml.new
 
 # Learning store
 *.db
