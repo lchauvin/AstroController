@@ -1,0 +1,150 @@
+/* AstroController — design tokens (dark blueprint).
+ *
+ * The Industry design system (see AstroBlog design/_ds), re-based on a dark
+ * ground for a UI that is read outdoors, at night, next to a telescope. The
+ * visual language is carried by the structure, not by decoration: 1px hairline
+ * borders, square corners, mono micro-labels, and condensed uppercase tracked
+ * headings. Framed media sit on a near-black "mount plate" with `+`
+ * registration marks.
+ *
+ * Two themes are defined by the `data-theme` attribute on <html>:
+ *   dark  — the default dark blueprint.
+ *   night — red night-vision. The whole palette maps onto one red hue, which
+ *           destroys colour semantics on purpose. Nothing in the UI may carry
+ *           meaning by hue alone; every state also has a label, icon or shape.
+ *
+ * Token names are kept stable across both themes so components never branch on
+ * theme. Charts read these variables through core.js `cssVar()`, so every name
+ * a chart touches (`--series-N`, `--muted`, `--grid`, `--sans`, `--text-2`,
+ * `--text`, `--panel-3`) is defined here.
+ *
+ * Offline story: the Barlow / Barlow Condensed faces are loaded in index.html
+ * via Google Fonts with these stacks as fallback, so the page renders
+ * correctly with no network. TODO: self-host the two faces if a fully-offline
+ * observatory PC needs them (drop-in swap of the <link> for @font-face).
+ */
+
+/* ── dark blueprint (default) ─────────────────────────────────────── */
+:root,
+:root[data-theme="dark"] {
+  /* Industry accent: steel blue, lifted one lightness step for dark-ground
+     contrast (from the upstream accent-100..900 ramp, not a new hue). */
+  --color-accent: #749dc4;      /* accent-500 on dark */
+  --color-accent-deep: #5980a6; /* canonical Industry steel blue */
+
+  /* Surfaces — the dark ground and the panels that sit on it. */
+  --bg: #0a0e17;
+  --bg-grad: radial-gradient(1200px 700px at 78% -10%, #16233c 0%, #0a0e17 62%);
+  --panel: #10141d;
+  --panel-2: #151b26;
+  --panel-3: #1b2331;
+
+  /* Hairline borders. 1px, derived from the ink so they sit at a constant
+     contrast on any surface; Industry draws structure with a hairline, never
+     with a filled divider. `--line-soft` is the fainter panel-inner seam. */
+  --line: color-mix(in srgb, var(--text) 16%, transparent);
+  --line-soft: color-mix(in srgb, var(--text) 9%, transparent);
+
+  /* Ink. */
+  --text: #e8ecf1;
+  --text-2: #a3aec0;
+  --muted: #6e7889;
+
+  /* Categorical series for charts, checked for colour-vision deficiency on
+     this surface; status colours are reserved and never reused as series. */
+  --series-1: #3f8fe0;
+  --series-2: #d97a3c;
+  --series-3: #33a37c;
+
+  /* Status. */
+  --good: #2fa45c;
+  --good-ink: #56cf86;
+  --warn: #e0a52f;
+  --serious: #e07a4a;
+  --critical: #c94f4f;
+  --critical-ink: #f26d6d;
+
+  /* Chart grid: a hairline that reads on the panel without competing with the
+     series drawn over it. */
+  --grid: color-mix(in srgb, var(--text) 8%, transparent);
+
+  /* Typography. `--font-heading`/`--font-body` are the Industry token names;
+     `--sans`/`--mono` are the aliases components consume. */
+  --font-heading: "Barlow Condensed", "Barlow", system-ui, sans-serif;
+  --font-heading-weight: 600;
+  --font-body: "Barlow", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  --sans: var(--font-body);
+
+  /* Spacing scale (px). Industry's scale genuinely skips the 5 and 7 steps. */
+  --space-1: 3.4px;
+  --space-2: 6.8px;
+  --space-3: 10.2px;
+  --space-4: 13.6px;
+  --space-6: 20.4px;
+  --space-8: 27.2px;
+
+  /* Corners. Square by design: panels and cards are unrounded. The radius
+     tokens remain only for the few controls that are round by nature (pills,
+     toggles); nothing structural should consume them for rounding. */
+  --radius-sm: 2px;
+  --radius: 0;      /* structural corners are square */
+  --radius-md: 4px; /* @deprecated: kept for parity; do not use on panels */
+  --radius-lg: 7px; /* @deprecated: kept for parity; do not use on panels */
+
+  /* Elevation on a dark ground: a hairline edge plus ambient darkness. */
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 28px -12px rgba(0, 0, 0, 0.7);
+
+  /* Framed media: the near-black plate a photograph or crop is mounted on,
+     and the hairline registration marks drawn at its corners. */
+  --mount: #060810;
+  --mount-line: color-mix(in srgb, var(--text) 22%, transparent);
+
+  /* Focus. */
+  --focus-ring: var(--color-accent);
+
+  /* Layout & motion. */
+  --page-max: 1280px;
+  --rail-width: 224px;
+  --transition: 140ms ease-out;
+}
+
+/* ── night vision (red) ───────────────────────────────────────────── */
+/* One hue, three lightnesses. Dark adaptation is worth more than a legible
+   palette, and every element that used colour to mean something also carries
+   a label or an icon. Photographs are re-hued separately: index.html carries
+   an feColorMatrix (#night-red) that maps luminance straight onto red so a
+   bright star stays red instead of clipping to yellow; style.css applies it
+   to <img> under this theme. */
+:root[data-theme="night"] {
+  --color-accent: #c96a5e;
+  --color-accent-deep: #a34a40;
+
+  --bg: #080000;
+  --bg-grad: radial-gradient(1100px 700px at 78% -10%, #200404 0%, #080000 62%);
+  --panel: #130404;
+  --panel-2: #180707;
+  --panel-3: #1f0a0a;
+
+  --text: #ff9b8f;
+  --text-2: #c96a5e;
+  --muted: #99483f;
+
+  --series-1: #ff6a4d;
+  --series-2: #ff3b30;
+  --series-3: #d4644a;
+
+  --good: #ff7a5c;
+  --good-ink: #ff8f75;
+  --warn: #ff6b4a;
+  --serious: #ff5540;
+  --critical: #ff3b30;
+  --critical-ink: #ff5f55;
+
+  --shadow: none; /* no ambient contrast to model on a flat red field */
+  --mount: #0a0202;
+  --focus-ring: var(--color-accent);
+}
+
+/* Line/grid are derived from ink via color-mix in :root, so the single-hue
+   night palette re-derives them automatically; no per-theme override needed. */

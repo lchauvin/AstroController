@@ -192,6 +192,8 @@ const DEFAULT_PREFS = {
   stretchWhite: 99.9,
   stretchInvert: false,
   viewerAuto: true,
+  guideYmin: null,
+  guideYmax: null,
 };
 
 function readPrefs() {

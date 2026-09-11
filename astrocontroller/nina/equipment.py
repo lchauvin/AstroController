@@ -15,21 +15,20 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-# (api name, label, icon). The API name is what goes in the URL; `guider` is
-# NINA's own guider abstraction, which is not the same thing as our direct PHD2
-# connection -- both appear, and it is useful when they disagree.
+# (api name, label, icon). `guider` is NINA's own guider abstraction, which is
+# not the same thing as our direct PHD2 connection -- both appear, and it is
+# useful when they disagree. Rotator, dome, switch and safety monitor are
+# deliberately absent: those are observatory-infrastructure devices that almost
+# never change state during a session, so a list aimed at "what needs attention
+# at 2am" is shorter without them.
 DEVICES: tuple[tuple[str, str, str], ...] = (
     ("camera", "Camera", "camera"),
     ("mount", "Mount", "mount"),
     ("focuser", "Focuser", "focuser"),
     ("filterwheel", "Filter wheel", "filter"),
     ("guider", "Guider", "guider"),
-    ("rotator", "Rotator", "rotator"),
-    ("dome", "Dome", "dome"),
-    ("switch", "Switch", "switch"),
     ("flatdevice", "Flat panel", "flat"),
     ("weather", "Weather", "weather"),
-    ("safetymonitor", "Safety", "safety"),
 )
 
 DEVICE_NAMES: tuple[str, ...] = tuple(name for name, _label, _icon in DEVICES)
@@ -124,22 +123,6 @@ def _guider(payload: dict) -> str:
     )
 
 
-def _rotator(payload: dict) -> str:
-    angle = _number(_pick(payload, "Position", "MechanicalPosition"))
-    return _join(
-        f"{angle}°" if angle is not None else None,
-        "moving" if _pick(payload, "IsMoving") is True else None,
-    )
-
-
-def _dome(payload: dict) -> str:
-    return _join(
-        str(_pick(payload, "ShutterStatus") or "") or None,
-        "slewing" if _pick(payload, "Slewing") is True else None,
-        "parked" if _pick(payload, "AtPark") is True else None,
-    )
-
-
 def _flatdevice(payload: dict) -> str:
     brightness = _pick(payload, "Brightness")
     return _join(
@@ -160,34 +143,14 @@ def _weather(payload: dict) -> str:
     )
 
 
-def _safety(payload: dict) -> str:
-    safe = _pick(payload, "IsSafe")
-    if safe is True:
-        return "safe"
-    if safe is False:
-        return "UNSAFE"
-    return ""
-
-
-def _switch(payload: Any) -> str:
-    writable = _pick(payload, "WritableSwitches") or []
-    readonly = _pick(payload, "ReadonlySwitches") or []
-    count = len(writable) + len(readonly) if isinstance(writable, list) else 0
-    return f"{count} switches" if count else ""
-
-
 DETAIL_BUILDERS = {
     "camera": _camera,
     "mount": _mount,
     "focuser": _focuser,
     "filterwheel": _filterwheel,
     "guider": _guider,
-    "rotator": _rotator,
-    "dome": _dome,
     "flatdevice": _flatdevice,
     "weather": _weather,
-    "safetymonitor": _safety,
-    "switch": _switch,
 }
 
 

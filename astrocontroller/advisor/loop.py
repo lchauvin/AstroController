@@ -338,13 +338,23 @@ class Advisor:
 
         if proposal_dict is None:
             rationale = (parsed or {}).get("rationale", "") if parsed else ""
+            if not baseline.usable:
+                # No history for these conditions: the model is guessing, and
+                # "cannot justify a change" is its way of saying so. Say it
+                # plainly instead of relaying the model's phrasing.
+                detail = (
+                    "no prior history for these conditions; "
+                    "leaving the settings alone until some is recorded"
+                )
+            else:
+                detail = f"model advises no change: {rationale}"
             self._audit(
                 verdict="no_action", raw=reply.text, parsed=parsed,
                 latency_ms=reply.latency_ms, prompt_chars=reply.prompt_chars,
             )
             return TickResult(
                 "hold",
-                f"model advises no change: {rationale}"[:200],
+                detail[:200],
                 rms=stats.rms_total,
                 bucket=baseline.bucket,
                 baseline=baseline.as_dict(),

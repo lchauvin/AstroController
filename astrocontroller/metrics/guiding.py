@@ -73,6 +73,11 @@ class RmsStats:
     star_mass_med: float
     ra_limited_frac: float = 0.0
     dec_limited_frac: float = 0.0
+    ra_corr_ms: float = 0.0
+    """Mean pulse duration issued during the window, in milliseconds."""
+    dec_corr_ms: float = 0.0
+    ra_oscillation: float = 0.0
+    """Peak-to-RMS ratio: 1.4 = sine, 1.7 = random noise; higher = resonant."""
 
     def as_dict(self) -> dict:
         return {
@@ -86,6 +91,9 @@ class RmsStats:
             "se_total": round(self.se_total, 4),
             "hfd_med": round(self.hfd_med, 2),
             "snr_med": round(self.snr_med, 1),
+            "ra_corr_ms": round(self.ra_corr_ms, 0),
+            "dec_corr_ms": round(self.dec_corr_ms, 0),
+            "ra_oscillation": round(self.ra_oscillation, 2),
         }
 
 
@@ -138,6 +146,11 @@ def compute_rms(
         star_mass_med=_median([s.star_mass for s in samples]),
         ra_limited_frac=sum(1 for s in samples if s.ra_limited) / n,
         dec_limited_frac=sum(1 for s in samples if s.dec_limited) / n,
+        ra_corr_ms=sum(s.ra_duration_ms for s in samples) / n,
+        dec_corr_ms=sum(s.dec_duration_ms for s in samples) / n,
+        ra_oscillation=(
+            max(abs(v) for v in ra) / rms_ra if rms_ra > 1e-9 else 0.0
+        ),
     )
 
 

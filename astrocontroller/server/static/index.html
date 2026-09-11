@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <title>AstroController</title>
+<!-- Barlow + Barlow Condensed drive the Industry typography (condensed
+     tracked headings, mono micro-labels). Loaded from Google Fonts; theme.css
+     defines system fallbacks so the page renders correctly offline.
+     TODO: self-host these two faces for a fully-offline observatory PC. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow:wght@400;500;600&display=swap">
+<!-- Design tokens first: theme.css defines the palette/typography/structure
+     variables (dark + night variants) that style.css components consume. -->
+<link rel="stylesheet" href="/static/theme.css">
 <link rel="stylesheet" href="/static/style.css">
 <!-- uPlot is vendored rather than loaded from a CDN: an observatory PC is
      often offline, and the dashboard has to work anyway. -->
@@ -28,7 +39,6 @@
         0      0      0     1 0"/>
     </filter>
     <g id="i-dashboard"><rect x="3" y="3" width="7" height="8" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="11" width="7" height="10" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></g>
-    <g id="i-image"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M3 16l5-4 4 3 3-2 6 5"/></g>
     <g id="i-guiding"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="1.6"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></g>
     <g id="i-sequence"><path d="M8 5h13M8 12h13M8 19h13"/><circle cx="4" cy="5" r="1.4"/><circle cx="4" cy="12" r="1.4"/><circle cx="4" cy="19" r="1.4"/></g>
     <g id="i-settings"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.5a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9h-.2a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.4-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5v-.2a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.4l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z"/></g>
@@ -46,16 +56,11 @@
     <g id="i-moon"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></g>
     <g id="i-play"><path d="M7 4.8l12 7.2-12 7.2z"/></g>
     <g id="i-stop"><rect x="6" y="6" width="12" height="12" rx="2"/></g>
-    <g id="i-skip"><path d="M6 5l9 7-9 7z"/><path d="M18 5v14"/></g>
-    <g id="i-reset"><path d="M3.5 12a8.5 8.5 0 1 0 2.8-6.3"/><path d="M3 4v5h5"/></g>
     <g id="i-refresh"><path d="M20.5 12a8.5 8.5 0 1 1-2.8-6.3"/><path d="M21 4v5h-5"/></g>
-    <g id="i-expand"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></g>
     <g id="i-close"><path d="M6 6l12 12M18 6L6 18"/></g>
     <g id="i-alert"><path d="M12 3.5L22 20H2z"/><path d="M12 9.5v4.5M12 17h.01"/></g>
     <g id="i-check"><path d="M4.5 12.5l5 5 10-11"/></g>
     <g id="i-eye"><path d="M1.8 12S5.5 5.5 12 5.5 22.2 12 22.2 12 18.5 18.5 12 18.5 1.8 12 1.8 12z"/><circle cx="12" cy="12" r="3"/></g>
-    <g id="i-menu"><path d="M3 6h18M3 12h18M3 18h18"/></g>
-    <g id="i-star"><circle cx="12" cy="12" r="2.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4M5.5 5.5l2.8 2.8M15.7 15.7l2.8 2.8M18.5 5.5l-2.8 2.8M8.3 15.7l-2.8 2.8"/></g>
   </defs>
 </svg>
 
@@ -71,11 +76,13 @@
     </div>
     <ul class="rail-nav">
       <li><button class="nav-item is-active" data-page="dashboard"><svg viewBox="0 0 24 24"><use href="#i-dashboard"/></svg><span>Dashboard</span></button></li>
-      <li><button class="nav-item" data-page="imaging"><svg viewBox="0 0 24 24"><use href="#i-image"/></svg><span>Imaging</span></button></li>
       <li><button class="nav-item" data-page="guiding"><svg viewBox="0 0 24 24"><use href="#i-guiding"/></svg><span>Guiding</span></button></li>
-      <li><button class="nav-item" data-page="sequence"><svg viewBox="0 0 24 24"><use href="#i-sequence"/></svg><span>Sequence</span></button></li>
       <li><button class="nav-item" data-page="settings"><svg viewBox="0 0 24 24"><use href="#i-settings"/></svg><span>Settings</span></button></li>
     </ul>
+    <div class="rail-equipment" id="rail-equipment">
+      <h2 class="rail-equipment-head">Equipment <span class="pill" id="equip-summary">–</span></h2>
+      <div class="rail-equipment-list" id="rail-equipment-list"></div>
+    </div>
     <div class="rail-foot">
       <div class="conn" id="conn">
         <span class="dot" id="conn-dot"></span>
@@ -101,105 +108,26 @@
     </header>
 
     <!-- Dashboard --------------------------------------------------->
+    <!-- Three-row budget: KPI strip / media+guiding / status. Tuned to fit
+         one viewport in style.css (#page-dashboard .grid row template). -->
     <main class="page is-active" id="page-dashboard">
       <section class="tiles" id="kpi-tiles"></section>
 
       <div class="grid">
-        <section class="card span-5" id="card-frame">
+        <!-- Row 1: the image, and how guiding is doing. -->
+        <section class="card span-7 viewer-card" id="card-frame">
           <header class="card-head">
             <h2>Last frame</h2>
             <span class="pill" id="frame-source">–</span>
-          </header>
-          <div class="framebox" id="dash-framebox">
-            <img id="dash-frame" alt="Most recent captured frame">
-            <div class="framebox-empty" id="dash-frame-empty">Waiting for the first frame…</div>
-          </div>
-          <div class="frame-caption" id="dash-frame-caption"></div>
-        </section>
-
-        <section class="card span-7" id="card-guide">
-          <header class="card-head">
-            <h2>Guiding</h2>
-            <span class="pill" id="dash-guide-state">–</span>
-          </header>
-          <div class="chart-legend" id="dash-guide-legend"></div>
-          <div class="chart" id="dash-guide-chart" style="height:210px"></div>
-          <div class="banner warn" id="guide-disturbed" hidden></div>
-          <div class="metric-row" id="dash-guide-metrics"></div>
-        </section>
-
-        <section class="card span-7" id="card-equipment">
-          <header class="card-head">
-            <h2>Equipment</h2>
-            <span class="pill" id="equip-summary">–</span>
-          </header>
-          <div class="equipment" id="equipment-list"></div>
-        </section>
-
-        <section class="card span-5" id="card-sequence-mini">
-          <header class="card-head">
-            <h2>Sequence</h2>
-            <span class="pill" id="dash-seq-pill">–</span>
-          </header>
-          <div class="progress-block">
-            <div class="progress-ring" id="seq-ring"></div>
-            <div class="progress-copy">
-              <div class="progress-now" id="dash-seq-current">No sequence loaded</div>
-              <div class="progress-sub" id="dash-seq-sub"></div>
-            </div>
-          </div>
-          <div class="button-row">
-            <button class="btn go" data-seq="start"><svg viewBox="0 0 24 24"><use href="#i-play"/></svg>Start</button>
-            <button class="btn danger" data-seq="stop" data-confirm="Stop the running sequence?"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg>Stop</button>
-          </div>
-        </section>
-
-        <section class="card span-5" id="card-weather">
-          <header class="card-head">
-            <h2>Weather &amp; sky</h2>
-            <span class="pill" id="weather-pill">–</span>
-          </header>
-          <div class="metric-row" id="weather-metrics"></div>
-          <div class="chart-legend" id="cloud-legend"></div>
-          <div class="chart" id="cloud-chart" style="height:130px"></div>
-          <div class="moon-row" id="moon-info"></div>
-        </section>
-
-        <section class="card span-7" id="card-advisor-mini">
-          <header class="card-head">
-            <h2>Advisor</h2>
-            <span class="pill" id="dash-advisor-pill">–</span>
-          </header>
-          <div class="advice" id="dash-advisor-last">Waiting for the first tick…</div>
-          <div class="list" id="dash-advisor-changes"></div>
-        </section>
-      </div>
-    </main>
-
-    <!-- Imaging ----------------------------------------------------->
-    <main class="page" id="page-imaging">
-      <div class="grid">
-        <section class="card span-8 viewer-card">
-          <header class="card-head">
-            <h2>Frame viewer</h2>
-            <span class="pill" id="viewer-source">–</span>
             <div class="head-actions">
-              <label class="switch small">
-                <input type="checkbox" id="viewer-auto" checked>
-                <span>Auto</span>
-              </label>
-              <button class="icon-button" id="viewer-refresh" title="Reload now">
+              <button class="icon-button" id="dash-frame-refresh" title="Reload now">
                 <svg viewBox="0 0 24 24"><use href="#i-refresh"/></svg>
               </button>
-              <button class="icon-button" id="viewer-full" title="Fill the screen">
-                <svg viewBox="0 0 24 24"><use href="#i-expand"/></svg>
-              </button>
             </div>
           </header>
-          <div class="framebox large" id="viewer-box">
-            <img id="viewer-frame" alt="Most recent captured frame">
-            <div class="framebox-empty" id="viewer-empty">Waiting for the first frame…</div>
-            <div class="framebox-spinner" id="viewer-spinner" hidden></div>
+          <div class="framebox large" id="dash-framebox">
+            <img id="dash-frame" alt="Most recent captured frame">
+            <div class="framebox-empty" id="dash-frame-empty">Waiting for the first frame…</div>
           </div>
           <div class="viewer-controls">
             <label class="slider">
@@ -216,34 +144,65 @@
             </label>
             <button class="btn ghost" id="stretch-reset">Reset</button>
           </div>
-          <div class="frame-caption" id="viewer-caption"></div>
+          <div class="frame-caption" id="dash-frame-caption"></div>
         </section>
 
-        <section class="card span-4">
-          <header class="card-head"><h2>Frame statistics</h2>
+        <section class="card span-5" id="card-guide">
+          <header class="card-head">
+            <h2>Guiding</h2>
+            <span class="pill" id="dash-guide-state">–</span>
+          </header>
+          <div class="chart-legend" id="dash-guide-legend"></div>
+          <div class="chart" id="dash-guide-chart"></div>
+          <div class="banner warn" id="guide-disturbed" hidden></div>
+          <div class="metric-row" id="dash-guide-metrics"></div>
+        </section>
+
+        <!-- Row 2: frame quality, sky, and the night's progress. -->
+        <section class="card span-4" id="card-stats">
+          <header class="card-head">
+            <h2>Frame stats</h2>
             <span class="pill" id="frame-verdict">–</span>
           </header>
           <div class="flags" id="frame-flags"></div>
-          <table class="kv" id="frame-stats"></table>
-        </section>
-
-        <section class="card span-6">
-          <header class="card-head"><h2>Star size across the session</h2></header>
-          <p class="card-note">HFR per frame, newest on the right. A rising line
-            is losing focus or transparency.</p>
-          <div class="chart" id="hfr-chart" style="height:170px"></div>
-        </section>
-
-        <section class="card span-6">
-          <header class="card-head"><h2>Recent frames</h2>
-            <span class="pill" id="frames-count">–</span>
-          </header>
           <div class="table-scroll">
-            <table class="rows" id="frame-table"></table>
+            <table class="kv" id="frame-stats"></table>
+          </div>
+        </section>
+
+        <section class="card span-4" id="card-weather">
+          <header class="card-head">
+            <h2>Weather &amp; sky</h2>
+            <span class="pill" id="weather-pill">–</span>
+          </header>
+          <div class="metric-row" id="weather-metrics"></div>
+          <div class="chart-legend" id="cloud-legend"></div>
+          <div class="chart" id="cloud-chart"></div>
+          <div class="moon-row" id="moon-info"></div>
+        </section>
+
+        <section class="card span-4" id="card-sequence-mini">
+          <header class="card-head">
+            <h2>Sequence</h2>
+            <span class="pill" id="dash-seq-pill">–</span>
+          </header>
+          <div class="progress-block">
+            <div class="progress-ring" id="seq-ring"></div>
+            <div class="progress-copy">
+              <div class="progress-now" id="dash-seq-current">No sequence loaded</div>
+              <div class="progress-sub" id="dash-seq-sub"></div>
+            </div>
+          </div>
+          <div class="button-row">
+            <button class="btn go" data-seq="start"><svg viewBox="0 0 24 24"><use href="#i-play"/></svg>Start</button>
+            <button class="btn danger" data-seq="stop" data-confirm="Stop the running sequence?"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg>Stop</button>
           </div>
         </section>
       </div>
     </main>
+
+    <!-- Imaging is folded into the Dashboard (viewer + frame stats) in T4;
+         the standalone page is retired. -->
 
     <!-- Guiding ----------------------------------------------------->
     <main class="page" id="page-guiding">
@@ -317,26 +276,6 @@
           <h3 class="subhead">Recent refusals</h3>
           <div class="list" id="advisor-vetoes"></div>
         </section>
-      </div>
-    </main>
-
-    <!-- Sequence ---------------------------------------------------->
-    <main class="page" id="page-sequence">
-      <div class="grid">
-        <section class="card span-8">
-          <header class="card-head">
-            <h2>Sequence</h2>
-            <span class="pill" id="seq-pill">–</span>
-          </header>
-          <div class="current-step" id="seq-current">No sequence loaded</div>
-          <div class="button-row">
-            <button class="btn go" data-seq="start"><svg viewBox="0 0 24 24"><use href="#i-play"/></svg>Start</button>
-            <button class="btn danger" data-seq="stop" data-confirm="Stop the running sequence?"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg>Stop</button>
-            <button class="btn" data-seq="skip" data-confirm="Skip the current instruction?"><svg viewBox="0 0 24 24"><use href="#i-skip"/></svg>Skip</button>
-            <button class="btn" data-seq="reset" data-confirm="Reset sequence progress?"><svg viewBox="0 0 24 24"><use href="#i-reset"/></svg>Reset</button>
-          </div>
-          <div class="tree" id="seq-tree"></div>
-        </section>
 
         <section class="card span-4">
           <header class="card-head">
@@ -360,6 +299,10 @@
       </div>
     </main>
 
+    <!-- Sequence is folded into the Dashboard's compact panel (T4) and its
+         polar-alignment card into the Guiding page (T5); the standalone page
+         is retired. -->
+
     <!-- Settings ---------------------------------------------------->
     <main class="page" id="page-settings">
       <div class="settings-head">
@@ -373,11 +316,14 @@
         </div>
       </div>
       <div class="banner warn" id="settings-restart" hidden></div>
-      <div class="grid" id="settings-groups"></div>
+      <div class="page-col">
+        <div class="grid" id="settings-groups"></div>
+      </div>
 
-      <div class="grid">
-        <section class="card span-6">
-          <header class="card-head"><h2>Appearance</h2></header>
+      <div class="page-col">
+        <div class="grid">
+          <section class="card span-12">
+            <header class="card-head"><h2>Appearance</h2></header>
           <p class="card-note">Stored in this browser only, not in the config file.</p>
           <div class="field-row">
             <div class="field">
@@ -404,11 +350,22 @@
             </div>
             <label class="switch"><input type="checkbox" id="pref-confirm" checked><span></span></label>
           </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="pref-guide-ymin">Guiding graph y-range</label>
+              <p class="field-help">Fixed min / max for the Dashboard guide trace (arcseconds).
+                Leave empty for auto-scale. The Guiding page always auto-scales.</p>
+            </div>
+            <div class="pair-inputs">
+              <input type="number" id="pref-guide-ymin" step="0.1" min="-5" max="0" placeholder="auto" aria-label="Minimum y value">
+              <input type="number" id="pref-guide-ymax" step="0.1" min="0.1" max="10" placeholder="auto" aria-label="Maximum y value">
+            </div>
+          </div>
         </section>
 
-        <section class="card span-6">
-          <header class="card-head">
-            <h2>System</h2>
+          <section class="card span-12">
+            <header class="card-head">
+              <h2>System</h2>
             <span class="pill" id="health-pill">–</span>
           </header>
           <div class="list" id="health-list"></div>
@@ -421,6 +378,7 @@
           <h3 class="subhead">Learning store</h3>
           <div class="list" id="store-stats"></div>
         </section>
+        </div>
       </div>
     </main>
 

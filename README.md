@@ -256,7 +256,9 @@ Five pages, one live stream behind all of them.
 The night-vision toggle in the top bar shifts everything to red. It also
 destroys every colour distinction the palette makes, which is why nothing in
 the UI signals state by colour alone: a device row carries "on"/"off" in words
-beside its dot, and every chart names its series in a legend.
+beside its dot, and every chart names its series in a legend. The dashboard
+guide trace can be given a fixed y-axis from Settings (browser preference);
+the Guiding page always auto-scales so the guide star's wander stays visible.
 
 Two things about the images. The frame preview reads the newest FITS off
 `[images].share_path`, bins it down, applies a midtone-transfer autostretch and

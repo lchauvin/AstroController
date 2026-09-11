@@ -72,7 +72,7 @@ function renderGroups() {
 
   $("settings-groups").innerHTML = described.groups
     .map(
-      (group) => `<section class="card span-6">
+      (group) => `<section class="card span-12">
         <header class="card-head"><h2>${esc(group.title)}</h2></header>
         ${group.fields
           .map((field) => {
@@ -210,7 +210,9 @@ export function registerSettings() {
   width.addEventListener("change", () => {
     prefs.viewerWidth = Number(width.value);
     savePrefs();
-    import("./imaging.js").then((m) => m.refresh({ force: true }));
+    // The latest-frame viewer lives on the Dashboard now; reload it at the new
+    // resolution so the change shows on the next frame.
+    import("./pages/dashboard.js").then((m) => m.refresh({ force: true }));
   });
 
   const confirmBox = $("pref-confirm");
@@ -219,4 +221,22 @@ export function registerSettings() {
     prefs.confirm = confirmBox.checked;
     savePrefs();
   });
+
+  // Dashboard guide trace y-range: blank means auto-scale, a number pins it.
+  const ymin = $("pref-guide-ymin");
+  const ymax = $("pref-guide-ymax");
+  if (ymin && ymax) {
+    ymin.value = prefs.guideYmin ?? "";
+    ymax.value = prefs.guideYmax ?? "";
+    const update = () => {
+      const parse = (v) => (v === "" ? null : Number(v));
+      prefs.guideYmin = parse(ymin.value);
+      prefs.guideYmax = parse(ymax.value);
+      savePrefs();
+      // Redraw the dashboard chart at the new range.
+      import("./pages/dashboard.js").then((m) => m.refresh({ force: true }));
+    };
+    ymin.addEventListener("change", update);
+    ymax.addEventListener("change", update);
+  }
 }

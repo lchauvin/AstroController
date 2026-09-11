@@ -127,7 +127,14 @@ def serve(config: Config, create_app, uvicorn) -> None:
     *before* running lifespan shutdown, so without this the process hangs on
     "Waiting for connections to close" until every browser tab is closed.
     `timeout_graceful_shutdown` is a backstop for anything else that lingers.
+
+    On Windows a Ctrl+C lands in the SelectorEventLoop while the
+    asyncio.Runner is doing its thing, and the resulting KeyboardInterrupt +
+    CancelledError tracebacks look like a crash. Running the coroutine through
+    `asyncio.run` under a plain try/except lets it unwind quietly.
     """
+    import asyncio
+
     holder: dict = {}
     app = create_app(config, should_stop=lambda: bool(holder.get("server") and holder["server"].should_exit))
     server = uvicorn.Server(
@@ -141,7 +148,10 @@ def serve(config: Config, create_app, uvicorn) -> None:
         )
     )
     holder["server"] = server
-    server.run()
+    try:
+        asyncio.run(server.serve())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
 
 
 def _run_fake(config: Config, log: logging.Logger) -> int:

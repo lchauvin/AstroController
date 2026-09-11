@@ -19,15 +19,23 @@ import {
 } from "./core.js";
 import { rethemeAll } from "./charts.js";
 import { registerPanels } from "./panels.js";
-import { registerImaging, refresh as refreshFrame, syncStarPolling } from "./imaging.js";
 import { loadSettings, registerSettings } from "./settings.js";
+import { refresh as refreshDashboard, registerDashboard } from "./pages/dashboard.js";
+import { refresh as refreshGuiding, registerGuiding, syncStarPolling } from "./pages/guiding.js";
 
 const PAGES = {
   dashboard: "Dashboard",
-  imaging: "Imaging",
   guiding: "Guiding",
-  sequence: "Sequence",
   settings: "Settings",
+};
+
+/* Per-page "you just became visible" nudges: a chart drawn into a hidden
+   element has no width to measure, and the guide star is polled only while its
+   page is on screen. */
+const PAGE_HOOKS = {
+  dashboard: refreshDashboard,
+  guiding: () => { refreshGuiding(); syncStarPolling(); },
+  settings: () => {},
 };
 
 /* ── routing ───────────────────────────────────────────────────────── */
@@ -45,12 +53,9 @@ function show(page) {
   savePrefs();
   if (location.hash.slice(1) !== page) history.replaceState(null, "", `#${page}`);
 
-  // A chart drawn into a hidden element has no width to measure, so any panel
-  // that just became visible needs a nudge.
   requestAnimationFrame(() => {
     emitAll();
-    refreshFrame();
-    syncStarPolling();
+    PAGE_HOOKS[page]();
   });
 }
 
@@ -75,40 +80,12 @@ function registerControls() {
       } else {
         act(button, `/api/guiding/${action}`);
       }
-    } else if (button.id === "revert-last") {
-      act(button, "/api/advisor/revert-last");
-    } else if (button.id === "revert-all") {
-      act(button, "/api/advisor/revert-all");
-    } else if (button.id === "pa-start") {
-      act(button, "/api/tppa/start", { body: JSON.stringify({}) });
-    } else if (button.id === "pa-stop") {
-      act(button, "/api/tppa/stop");
     } else if (button.id === "night-toggle") {
       setNight(!prefs.night);
     }
-  });
-
-  $("tuning-enabled").addEventListener("change", (event) => {
-    act(null, "/api/advisor/tuning", { body: JSON.stringify({ enabled: event.target.checked }) });
-  });
-
-  $("tuning-mode").addEventListener("change", (event) => {
-    act(null, "/api/advisor/tuning", { body: JSON.stringify({ mode: event.target.value }) });
-  });
-
-  // A parameter edit goes straight to PHD2, so it commits on blur or Enter
-  // rather than on every keystroke.
-  $("guide-params").addEventListener("change", (event) => {
-    const input = event.target;
-    if (input.tagName !== "INPUT") return;
-    act(null, "/api/guiding/param", {
-      body: JSON.stringify({
-        axis: input.dataset.axis,
-        param: input.dataset.param,
-        value: parseFloat(input.value),
-      }),
-      okMessage: `${input.dataset.axis}.${input.dataset.param} set`,
-    });
+    /* Parameters, advisor tuning/revert and TPPA start/stop are wired directly
+       inside js/pages/guiding.js -- deliberately not here, so the delegated
+       handler cannot fire them twice. */
   });
 
   $("pref-night").addEventListener("change", (event) => setNight(event.target.checked));
@@ -139,7 +116,8 @@ function startClock() {
 
 applyTheme();
 registerPanels();
-registerImaging();
+registerDashboard();
+registerGuiding();
 registerSettings();
 registerControls();
 startClock();
