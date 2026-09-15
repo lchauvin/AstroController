@@ -5,17 +5,19 @@ Follows the house pattern from ``astro_eval/analysis.py``: a single
 ``"provider/model-id"`` string, SDKs imported lazily inside the call so the
 package installs without any of them, and API keys read from the environment.
 
-Three of the four providers are OpenAI-compatible and differ only in base URL,
-so OpenRouter slots in beside Ollama with no new client code:
+Four of the five providers are OpenAI-compatible and differ only in base URL,
+so OpenRouter and Ollama Cloud slot in beside local Ollama with no new client
+code:
 
-===========  =========================================  ====================
-provider     base_url                                   key
-===========  =========================================  ====================
-ollama       {ollama_url}/v1                            (none needed)
-openrouter   https://openrouter.ai/api/v1               OPENROUTER_API_KEY
-openai       (default)                                  OPENAI_API_KEY
-anthropic    native SDK                                 ANTHROPIC_API_KEY
-===========  =========================================  ====================
+============  =========================================  ====================
+provider      base_url                                   key
+============  =========================================  ====================
+ollama        {ollama_url}/v1                             (none needed)
+ollama_cloud  https://ollama.com/v1                       OLLAMA_API_KEY
+openrouter    https://openrouter.ai/api/v1                OPENROUTER_API_KEY
+openai        (default)                                   OPENAI_API_KEY
+anthropic     native SDK                                  ANTHROPIC_API_KEY
+============  =========================================  ====================
 
 Note that an OpenRouter model id itself contains a slash
 (``anthropic/claude-sonnet-5``), so the provider is split off with
@@ -35,8 +37,9 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+OLLAMA_CLOUD_BASE = "https://ollama.com/v1"
 
-PROVIDERS = ("ollama", "openrouter", "openai", "anthropic")
+PROVIDERS = ("ollama", "ollama_cloud", "openrouter", "openai", "anthropic")
 
 
 class LlmError(RuntimeError):
@@ -64,6 +67,7 @@ def split_model(model_str: str) -> tuple[str, str]:
         raise LlmError(
             f"invalid model string {model_str!r}; expected 'provider/model-id', e.g.\n"
             "  ollama/llama3.1:8b\n"
+            "  ollama_cloud/gpt-oss:120b\n"
             "  openrouter/anthropic/claude-sonnet-5\n"
             "  anthropic/claude-opus-5"
         )
@@ -113,6 +117,15 @@ def call_llm(
 def _openai_target(provider: str, ollama_url: str) -> tuple[Optional[str], str]:
     if provider == "ollama":
         return ollama_url.rstrip("/") + "/v1", "ollama"
+    if provider == "ollama_cloud":
+        key = os.environ.get("OLLAMA_API_KEY", "").strip()
+        if not key:
+            raise LlmError(
+                "OLLAMA_API_KEY is not set.\n"
+                "Add it to .env (get one at https://ollama.com/settings/keys), "
+                "or switch [llm] model to an ollama/ model."
+            )
+        return OLLAMA_CLOUD_BASE, key
     if provider == "openrouter":
         key = os.environ.get("OPENROUTER_API_KEY", "").strip()
         if not key:

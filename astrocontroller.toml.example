@@ -80,9 +80,10 @@ poll_interval_s = 900
 forecast_days = 2
 
 [llm]
-# "provider/model-id". Providers: ollama, openrouter, openai, anthropic.
+# "provider/model-id". Providers: ollama, ollama_cloud, openrouter, openai, anthropic.
 # OpenRouter ids contain their own slash and are passed through intact.
 model = "ollama/llama3.1:8b"
+# model = "ollama_cloud/gpt-oss:120b"   # needs OLLAMA_API_KEY in .env
 # model = "openrouter/anthropic/claude-sonnet-5"
 ollama_url = "http://localhost:11434"
 max_tokens = 1500

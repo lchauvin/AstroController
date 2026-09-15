@@ -119,7 +119,7 @@ class WeatherConfig:
 @dataclass
 class LlmConfig:
     model: str = "ollama/llama3.1:8b"
-    """'provider/model-id'. Providers: ollama, openrouter, openai, anthropic."""
+    """'provider/model-id'. Providers: ollama, ollama_cloud, openrouter, openai, anthropic."""
     ollama_url: str = "http://localhost:11434"
     max_tokens: int = 1500
     timeout_s: float = 120.0

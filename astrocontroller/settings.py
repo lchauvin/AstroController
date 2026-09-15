@@ -140,7 +140,7 @@ FIELDS: tuple[Field, ...] = (
 
     # -- model ----------------------------------------------------------
     Field("llm", "model", "Model", "text",
-          "'provider/model-id'. Providers: ollama, openrouter, openai, anthropic.",
+          "'provider/model-id'. Providers: ollama, ollama_cloud, openrouter, openai, anthropic.",
           live=True, placeholder="ollama/llama3.1:8b"),
     Field("llm", "ollama_url", "Ollama URL", "text",
           "Only used when the provider is ollama.",
