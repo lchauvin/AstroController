@@ -606,6 +606,9 @@ class Runtime:
             guide_hfd_med=stats.hfd_med,
             altitude_med=cond.altitude_deg,
             conditions=cond.as_dict(),
+            ra_oscillation=stats.ra_oscillation,
+            ra_corr_ms=stats.ra_corr_ms,
+            dec_corr_ms=stats.dec_corr_ms,
         )
         await asyncio.to_thread(self.store.add_epoch, record)
         log.info(

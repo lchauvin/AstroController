@@ -56,6 +56,9 @@ class ScoredEpoch:
     minutes: float
     age_days: float
     score: float
+    ra_oscillation: Optional[float] = None
+    ra_corr_ms: Optional[float] = None
+    dec_corr_ms: Optional[float] = None
 
 
 @dataclass
@@ -70,6 +73,8 @@ class ChangeRecord:
     effect_sigma: Optional[float]
     seeing: Optional[float]
     confounded: bool
+    osc_before: Optional[float] = None
+    osc_after: Optional[float] = None
 
 
 @dataclass
@@ -115,6 +120,9 @@ def retrieve_context(
                 minutes=float(row["usable_seconds"] or 0.0) / 60.0,
                 age_days=age,
                 score=weight,
+                ra_oscillation=row["ra_oscillation"],
+                ra_corr_ms=row["ra_corr_ms"],
+                dec_corr_ms=row["dec_corr_ms"],
             )
         )
     scored.sort(key=lambda e: e.score, reverse=True)
@@ -145,6 +153,8 @@ def retrieve_context(
                 effect_sigma=row["effect_sigma"],
                 seeing=cond.seeing_arcsec,
                 confounded=bool(row["confounded"]),
+                osc_before=row["before_ra_oscillation"],
+                osc_after=row["after_ra_oscillation"],
             )
         )
 
@@ -211,12 +221,16 @@ def render_priors(ctx: RetrievedContext, budget: PromptBudget) -> str:
 
     if ctx.epochs:
         lines.append("")
-        lines.append("SIMILAR PAST RUNS  (see=arcsec alt=deg wind=m/s):")
+        lines.append(
+            "SIMILAR PAST RUNS  (see=arcsec alt=deg wind=m/s osc=RA ratio corr=ms):"
+        )
         for e in ctx.epochs:
             lines.append(
                 f"  see{_fmt(e.seeing,1)} alt{_fmt(e.altitude,0)} "
                 f"wnd{_fmt(e.wind,0)} | {_params_line(e.params)} "
-                f"| {e.rms_total:.2f}\" {e.minutes:.0f}min {e.age_days:.0f}d ago"
+                f"| {e.rms_total:.2f}\" osc{_fmt(e.ra_oscillation,1)} "
+                f"raC{_fmt(e.ra_corr_ms,0)} decC{_fmt(e.dec_corr_ms,0)} "
+                f"{e.minutes:.0f}min {e.age_days:.0f}d ago"
             )
 
     if ctx.changes:
@@ -233,7 +247,8 @@ def render_priors(ctx: RetrievedContext, budget: PromptBudget) -> str:
                 f"  {c.axis} {c.param} {c.before:g}->{c.after:g} "
                 f"see{_fmt(c.seeing,1)} | {_fmt(c.rms_before)}\"->"
                 f"{_fmt(c.rms_after)}\" {verdict} "
-                f"{_fmt(c.effect_sigma,1)}s{flag}"
+                f"{_fmt(c.effect_sigma,1)}s osc{_fmt(c.osc_before,1)}"
+                f"->{_fmt(c.osc_after,1)}{flag}"
             )
 
     if ctx.do_not_retry:

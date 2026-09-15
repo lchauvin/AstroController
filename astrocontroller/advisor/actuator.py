@@ -214,6 +214,7 @@ class Actuator:
             conditions=conditions,
             before_rms=before_stats.rms_total,
             before_n=before_stats.n,
+            before_ra_oscillation=before_stats.ra_oscillation,
             model_str=model_str,
         )
 
@@ -283,6 +284,7 @@ class Actuator:
                 delta=trial.delta,
                 effect_sigma=trial.effect_sigma,
                 confounded=trial.confounded,
+                after_ra_oscillation=trial.after.ra_oscillation if trial.after else None,
             )
 
         if trial.outcome != "worsened" or trial.confounded or trial.delta is None:

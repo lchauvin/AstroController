@@ -39,6 +39,16 @@ smooths noisy seeing but reacts more slowly.
 - minMove: deadband in pixels. Corrections smaller than this are skipped. \
 Raising it stops the mount chasing seeing; too high lets real drift accumulate.
 
+Two more diagnostics come with every RMS reading:
+- oscillation: RA peak-to-RMS ratio. ~1.4 is a pure sine (periodic error), \
+~1.7 is random noise, above ~2.2 means the mount is ringing (under-damped). \
+Ringing with high RMS calls for LESS aggression or MORE hysteresis, not more \
+aggression even though the RMS looks bad.
+- RA/Dec correction time: mean guide-pulse duration per frame, in \
+milliseconds. Rising alongside RMS with oscillation still low suggests real \
+drift is being under-corrected (raise aggression or lower minMove); high \
+values that never reduce RMS can mean backlash is eating the pulses.
+
 Rules:
 - Propose AT MOST ONE parameter change.
 - Prefer no change. "Leave it alone" is usually correct, especially when RMS \
@@ -107,7 +117,9 @@ def render_performance(stats: Optional[RmsStats]) -> str:
         f"(RA {stats.rms_ra:.2f}\", Dec {stats.rms_dec:.2f}\"), "
         f"peak RA {stats.peak_ra:.2f}\" Dec {stats.peak_dec:.2f}\", "
         f"n={stats.n} over {stats.usable_seconds:.0f}s clean, "
-        f"+/-{stats.se_total:.3f}\" standard error"
+        f"+/-{stats.se_total:.3f}\" standard error, "
+        f"oscillation {stats.ra_oscillation:.2f}, "
+        f"RA corr {stats.ra_corr_ms:.0f}ms Dec corr {stats.dec_corr_ms:.0f}ms"
     )
 
 

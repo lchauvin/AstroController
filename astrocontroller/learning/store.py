@@ -35,7 +35,7 @@ from ..metrics.conditions import ConditionVector, bucket_key
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 MIGRATIONS: list[tuple[int, str]] = [
     (
@@ -178,6 +178,16 @@ MIGRATIONS: list[tuple[int, str]] = [
           ON frame(session_id, t_utc);
         """,
     ),
+    (
+        2,
+        """
+        ALTER TABLE setting_epoch ADD COLUMN ra_oscillation REAL;
+        ALTER TABLE setting_epoch ADD COLUMN ra_corr_ms REAL;
+        ALTER TABLE setting_epoch ADD COLUMN dec_corr_ms REAL;
+        ALTER TABLE param_change ADD COLUMN before_ra_oscillation REAL;
+        ALTER TABLE param_change ADD COLUMN after_ra_oscillation REAL;
+        """,
+    ),
 ]
 
 
@@ -227,6 +237,9 @@ class EpochRecord:
     guide_hfd_med: Optional[float]
     altitude_med: Optional[float]
     conditions: dict
+    ra_oscillation: Optional[float] = None
+    ra_corr_ms: Optional[float] = None
+    dec_corr_ms: Optional[float] = None
 
 
 class LearningStore:
@@ -380,13 +393,15 @@ class LearningStore:
             "INSERT INTO setting_epoch (session_id, rig_id, start_utc, end_utc,"
             " params_json, params_hash, bucket_key, close_reason, usable_seconds,"
             " n_samples, rms_total, rms_ra, rms_dec, guide_hfd_med, altitude_med,"
-            " cond_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " cond_json, ra_oscillation, ra_corr_ms, dec_corr_ms)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (record.session_id, record.rig_id, record.start_utc, record.end_utc,
              json.dumps(record.params), params_hash(record.params),
              record.bucket_key, record.close_reason, record.usable_seconds,
              record.n_samples, record.rms_total, record.rms_ra, record.rms_dec,
              record.guide_hfd_med, record.altitude_med,
-             json.dumps(record.conditions)),
+             json.dumps(record.conditions),
+             record.ra_oscillation, record.ra_corr_ms, record.dec_corr_ms),
         )
         self.db.commit()
         return int(cur.lastrowid)
@@ -440,16 +455,18 @@ class LearningStore:
         model_str: Optional[str] = None,
         before_rms: Optional[float] = None,
         before_n: Optional[int] = None,
+        before_ra_oscillation: Optional[float] = None,
     ) -> int:
         cur = self.db.execute(
             "INSERT INTO param_change (session_id, rig_id, t_utc, source, model_str,"
             " axis, param, before_value, requested_value, applied_value, rationale,"
-            " bucket_key, cond_json, outcome, before_rms_total, before_n)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " bucket_key, cond_json, outcome, before_rms_total, before_n,"
+            " before_ra_oscillation)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (session_id, rig_id, utcnow(), source, model_str, axis, param,
              before_value, requested_value, applied_value, rationale,
              bucket_key(conditions), json.dumps(conditions.as_dict()),
-             "pending", before_rms, before_n),
+             "pending", before_rms, before_n, before_ra_oscillation),
         )
         self.db.commit()
         return int(cur.lastrowid)
@@ -464,13 +481,15 @@ class LearningStore:
         delta: Optional[float],
         effect_sigma: Optional[float],
         confounded: bool,
+        after_ra_oscillation: Optional[float] = None,
     ) -> None:
         self.db.execute(
             "UPDATE param_change SET outcome = ?, after_rms_total = ?, after_n = ?,"
-            " delta_rms_total = ?, effect_sigma = ?, confounded = ?, closed_at_utc = ?"
+            " delta_rms_total = ?, effect_sigma = ?, confounded = ?, closed_at_utc = ?,"
+            " after_ra_oscillation = ?"
             " WHERE change_id = ?",
             (outcome, after_rms, after_n, delta, effect_sigma,
-             int(confounded), utcnow(), change_id),
+             int(confounded), utcnow(), after_ra_oscillation, change_id),
         )
         self.db.commit()
 
