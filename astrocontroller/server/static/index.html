@@ -257,6 +257,11 @@
 
         <section class="card span-3">
           <header class="card-head"><h2>Advisor activity</h2></header>
+          <div class="button-row">
+            <button class="btn" id="revert-last" data-confirm="Revert the most recent parameter change?">Revert last</button>
+            <button class="btn danger" id="revert-all"
+                    data-confirm="Restore every guiding parameter to its value at session start?">Revert all</button>
+          </div>
           <h3 class="subhead">Changes this session</h3>
           <div class="list" id="advisor-changes"></div>
           <h3 class="subhead">Recent refusals</h3>
@@ -284,11 +289,6 @@
             be applied, the <b>arm</b> switch is the final kill switch. In Suggest mode
             the arm switch does nothing — nothing is ever written to PHD2.</p>
           <div class="advice" id="advisor-last">Waiting for the first tick…</div>
-          <div class="button-row">
-            <button class="btn" id="revert-last" data-confirm="Revert the most recent parameter change?">Revert last</button>
-            <button class="btn danger" id="revert-all"
-                    data-confirm="Restore every guiding parameter to its value at session start?">Revert all</button>
-          </div>
         </section>
       </div>
     </main>
