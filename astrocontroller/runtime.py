@@ -98,6 +98,7 @@ class Runtime:
             on_event=self._on_phd2_event,
             on_connect=self._on_phd2_connect,
             on_disconnect=self._on_phd2_disconnect,
+            on_state_change=self._publish_phd2,
         )
         self.nina_ws = NinaEventListener(
             cfg.nina.ws_base, self._on_nina_event, on_connect=self._resync_nina

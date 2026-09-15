@@ -146,6 +146,7 @@ class Phd2Client:
         on_event: Optional[EventHandler] = None,
         on_connect: Optional[Callable[[], Any]] = None,
         on_disconnect: Optional[Callable[[], Any]] = None,
+        on_state_change: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.host = host
         self.instance = instance
@@ -156,6 +157,14 @@ class Phd2Client:
         self._on_event = on_event
         self._on_connect = on_connect
         self._on_disconnect = on_disconnect
+        self._on_state_change = on_state_change
+        """
+        Fired after a state mutation PHD2 itself never announces an event for
+        -- currently just `set_algo_param`. A written parameter otherwise sits
+        correct in `self.state` but stale on every connected UI until the next
+        unrelated PHD2 event happens to fire a re-publish (which, mid-guiding,
+        can be minutes away or never).
+        """
 
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
@@ -544,6 +553,8 @@ class Phd2Client:
                 "PHD2 clamped %s.%s: requested %.4f, stored %.4f",
                 axis, name, value, readback,
             )
+        if self._on_state_change:
+            self._on_state_change()
         return readback
 
     async def refresh_algo_params(self) -> dict[tuple[str, str], float]:

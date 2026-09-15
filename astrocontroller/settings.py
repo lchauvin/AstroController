@@ -148,6 +148,11 @@ FIELDS: tuple[Field, ...] = (
     Field("llm", "context_profile", "Context size", "choice",
           help="'small' trims the prompt for 7-8B local models.",
           choices=("small", "large")),
+    Field("llm", "max_tokens", "Max response tokens", "number",
+          "Raise this for reasoning models (e.g. gpt-oss): thinking tokens "
+          "count against this budget too, so a low value truncates the "
+          "reply before it ever reaches the JSON answer.",
+          live=True, minimum=100, maximum=32000, step=100),
     Field("llm", "min_seconds_between_calls", "Model cooldown", "number",
           "Never call the model more often than this.",
           live=True, minimum=0, maximum=7200, step=30),
@@ -181,7 +186,7 @@ GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
       "tuning.actionable_rms_ratio", "tuning.auto_revert_ratio")),
     ("model", "Language model",
      ("llm.model", "llm.ollama_url", "llm.context_profile",
-      "llm.min_seconds_between_calls")),
+      "llm.max_tokens", "llm.min_seconds_between_calls")),
     ("server", "Server", ("server.host", "server.port", "storage.db_path")),
 )
 
