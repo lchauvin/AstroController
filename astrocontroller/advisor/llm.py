@@ -241,6 +241,7 @@ def _call_anthropic(
 # ── response parsing ───────────────────────────────────────────────────
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+_THINK = re.compile(r"<(think|reasoning)>.*?</\1>", re.DOTALL | re.IGNORECASE)
 
 
 def extract_json(text: str) -> Optional[dict]:
@@ -251,8 +252,18 @@ def extract_json(text: str) -> Optional[dict]:
     trailing explanation. This tries the whole string, then any fenced block,
     then the first balanced ``{...}`` span. Anything still unparseable returns
     None -- the caller treats that as "do nothing", never as a retry loop.
+
+    Reasoning models (gpt-oss and similar) can precede the answer with a
+    complete ``<think>``/``<reasoning>`` block; that is stripped first so the
+    balanced-brace scan finds the real answer rather than an example
+    structure mentioned while thinking out loud. A response that runs out of
+    tokens mid-thought -- no closing tag, no answer at all -- still correctly
+    yields None here; that is a `max_tokens` problem, not a parsing one.
     """
     if not text:
+        return None
+    text = _THINK.sub("", text)
+    if not text.strip():
         return None
     candidates = [text.strip()]
     candidates.extend(m.group(1).strip() for m in _FENCE.finditer(text))

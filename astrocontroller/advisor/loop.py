@@ -327,13 +327,20 @@ class Advisor:
         proposal_dict, error = parse_proposal(parsed)
 
         if error:
-            # A malformed reply is always a no-op, never a retry loop.
+            # A malformed reply is always a no-op, never a retry loop. The raw
+            # text is also in the `advice` table, but a snippet here means a
+            # bad reply is diagnosable from the log/UI alone -- this is what
+            # a truncated reasoning-model response (ran out of max_tokens
+            # mid-thought, before ever reaching the JSON) looks like.
             self._audit(
                 verdict="parse_error", raw=reply.text, parsed=parsed,
                 latency_ms=reply.latency_ms, prompt_chars=reply.prompt_chars,
             )
+            snippet = " ".join(reply.text.split())[:160] or "(empty)"
             return TickResult(
-                "error", f"unusable model response: {error}", rms=stats.rms_total
+                "error",
+                f"unusable model response: {error} -- raw: {snippet}",
+                rms=stats.rms_total,
             )
 
         if proposal_dict is None:
