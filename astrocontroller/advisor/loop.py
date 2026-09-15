@@ -157,8 +157,8 @@ class Advisor:
             return self._record(
                 TickResult(
                     "hold",
-                    f"{stats.rms_total:.2f}\" is at or below the "
-                    f"{target:.2f}\" target for these conditions",
+                    f"{stats.rms_total:.2f}″ is at or below the "
+                    f"{target:.2f}″ target for these conditions",
                     rms=stats.rms_total,
                     bucket=baseline.bucket,
                     baseline=baseline.as_dict(),
@@ -338,16 +338,7 @@ class Advisor:
 
         if proposal_dict is None:
             rationale = (parsed or {}).get("rationale", "") if parsed else ""
-            if not baseline.usable:
-                # No history for these conditions: the model is guessing, and
-                # "cannot justify a change" is its way of saying so. Say it
-                # plainly instead of relaying the model's phrasing.
-                detail = (
-                    "no prior history for these conditions; "
-                    "leaving the settings alone until some is recorded"
-                )
-            else:
-                detail = f"model advises no change: {rationale}"
+            detail = f"model advises no change: {rationale}" if rationale else "model advises no change"
             self._audit(
                 verdict="no_action", raw=reply.text, parsed=parsed,
                 latency_ms=reply.latency_ms, prompt_chars=reply.prompt_chars,

@@ -183,6 +183,17 @@ def _run_fake(config: Config, log: logging.Logger) -> int:
         simulated_share = await asyncio.to_thread(share.start)
         config.images.share_path = simulated_share or ""
 
+        # The guide-camera dump gets its own corner of the simulated share so
+        # the save_image -> FITS -> PNG field-view path is exercised too --
+        # without it the dashboard's guide panel never leaves the tight crop
+        # in simulation.
+        if simulated_share:
+            guide_dir = Path(simulated_share) / config.guide_camera.share_subdir
+            guide_dir.mkdir(parents=True, exist_ok=True)
+            phd2.save_dir = str(guide_dir)
+        else:
+            config.guide_camera.enabled = False
+
         nina_app = build_fake_nina_app(sim, share)
         nina_config = uvicorn.Config(
             nina_app, host="127.0.0.1", port=0, log_config=None, access_log=False
@@ -202,6 +213,10 @@ def _run_fake(config: Config, log: logging.Logger) -> int:
         # explicitly configured path so a test setup can point somewhere else.
         if config.storage.db_path == StorageConfig().db_path:
             config.storage.db_path = "astrocontroller-fake.db"
+
+        # A play session wants the guide field visible, not hidden behind a
+        # config flag the user may not have set.
+        config.guide_camera.enabled = True
 
         log.warning("SIMULATION MODE -- no real hardware is involved")
         log.info("fake NINA on :%d, fake PHD2 on :%d", nina_port, phd2_port)

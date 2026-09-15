@@ -18,9 +18,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from .advisor.actuator import Actuator
@@ -117,12 +120,19 @@ class Runtime:
         self.previewer = SharePreviewer(cfg.images.share_path)
         self._preview_wake = asyncio.Event()
 
+        # Guide-camera FITS dump: files this runtime itself prompted PHD2 to
+        # write, newest first. Pruning deletes the previous prompt's file only
+        # once its successor has landed, so a manual PHD2 save is never touched.
+        self._prompted_guide_saves: deque[str] = deque(maxlen=8)
+        self.guide_field: Optional[dict] = None
+
         self.epoch: Optional[Epoch] = None
         self.nina_flipping = False
         self.nina_autofocusing = False
         self.last_frame: Optional[ImageStats] = None
         self.recent_frames: list[dict] = []
         self._epoch_samples: list[tuple[float, float]] = []
+        self._guide_activity: Optional[tuple[str, float]] = None
 
     # ── lifecycle ──────────────────────────────────────────────────────
 
@@ -145,6 +155,7 @@ class Runtime:
             manages_connection=True,
         )
         self.supervisor.spawn("advisor", self._run_advisor)
+        self.supervisor.spawn("guide_saver", self._run_guide_saver)
         self.supervisor.spawn("sampler", self._run_sampler)
         self.supervisor.spawn("preview", self._watch_share)
         self.supervisor.spawn("coalescer", self.hub.run_coalescer)
@@ -196,8 +207,18 @@ class Runtime:
         if event == "GuideStep":
             sample = self.buffer.add_guide_step(msg)
             if sample is not None:
+                self._remember_activity("guiding")
                 self.hub.publish_coalesced("guiding", self._guiding_payload())
             return
+
+        # Disturbances the dashboard calls out by name on the guide-star card.
+        # Exclusion intervals expire by wall clock; the activity stamps expire
+        # the same way but carry a friendlier label.
+        if event in ("GuidingDithered", "SettleBegin"):
+            if event == "GuidingDithered":
+                self._remember_activity("dithering", for_s=self.config.tuning.dither_guard_s)
+        elif event in ("StarLost", "LockPositionLost"):
+            self._remember_activity("star lost", for_s=self.config.tuning.star_lost_guard_s)
 
         if event in ("ConfigurationChange", "GuidingStopped", "StartGuiding"):
             asyncio.create_task(self._close_and_reopen_epoch(event.lower()))
@@ -207,12 +228,29 @@ class Runtime:
     def _publish_phd2(self) -> None:
         self.hub.update("phd2", self.phd2.state.as_dict())
 
+    def _remember_activity(self, label: str, for_s: float = 3.0) -> None:
+        """Stamp what the mount is doing so short states are visible.
+
+        A dither or star loss is over in a frame, but the operator needs the
+        word on screen long enough to notice -- so the payload carries an
+        expiry instead of a boolean, and the UI treats a past expiry as
+        'guiding'."""
+        now = time.monotonic()
+        self._guide_activity = (label, now + for_s)
+
+    def _activity(self) -> Optional[str]:
+        if not self._guide_activity:
+            return None
+        label, until = self._guide_activity
+        return label if time.monotonic() < until else None
+
     def _guiding_payload(self) -> dict:
         stats = self.buffer.recent(300.0, self.exclusions.intervals)
         return {
             "rms": stats.as_dict() if stats else None,
             "graph": self.buffer.graph_series(600.0),
             "disturbed": self.exclusions.intervals.open_reasons,
+            "activity": self._activity(),
         }
 
     # ── NINA ───────────────────────────────────────────────────────────
@@ -651,6 +689,106 @@ class Runtime:
             except Exception:  # noqa: BLE001 - a bad tick must not kill the loop
                 log.exception("advisor tick failed")
 
+    # ── guide-camera FITS dump ─────────────────────────────────────────
+
+    def _guide_share_dir(self) -> Optional[Path]:
+        root = self.config.images.share_path
+        if not root:
+            return None
+        return Path(root) / self.config.guide_camera.share_subdir
+
+    async def _run_guide_saver(self) -> None:
+        """
+        Ask PHD2 to dump the guide frame as a FITS every `interval_s`.
+
+        PHD2's event API has no full-frame call; `save_image` is the only way
+        to one. The file lands in PHD2's image directory on the rig, and the
+        dashboard reads it back over the share. Each file we prompted is
+        deleted once its successor has landed, so the folder never accumulates
+        -- a manual PHD2 save is never in the list and is never touched.
+        """
+        cfg = self.config.guide_camera
+        while True:
+            await asyncio.sleep(max(2.0, cfg.interval_s))
+            if not cfg.enabled or not self.phd2.connected:
+                continue
+            # Saving from PHD2 while it is not looping produces nothing.
+            if self.phd2.state.app_state not in ("Guiding", "Looping", "Paused"):
+                continue
+            try:
+                result = await self.phd2.call("save_image", timeout=5.0)
+            except Exception as exc:  # noqa: BLE001 - a refused save is a state, not a fault
+                log.debug("guide save_image refused: %s", exc)
+                continue
+            await self._note_guide_save(result)
+
+    def _resolve_guide_path(self, filename: str) -> Optional[Path]:
+        """Where PHD2's save lands, as seen from *this* machine over the share."""
+        share_dir = self._guide_share_dir()
+        if share_dir is None:
+            return None
+        return share_dir / Path(filename).name
+
+    async def _note_guide_save(self, result) -> None:
+        """
+        Record a prompted save and prune the one before it.
+
+        PHD2 returns `{"filename": "<absolute path on the rig>"}`. The share
+        is keyed off the basename only: the absolute path belongs to the rig's
+        filesystem, not ours.
+        """
+        if not isinstance(result, dict):
+            return
+        filename = result.get("filename")
+        if not filename:
+            return
+
+        local = self._resolve_guide_path(str(filename))
+        if local is None:
+            return
+        self._prompted_guide_saves.append(str(local))
+
+        # Wait a beat for the write to finish over the network, then publish.
+        await asyncio.sleep(0.4)
+        try:
+            stat = await asyncio.to_thread(os.stat, local)
+        except OSError:
+            return
+
+        self.guide_field = {
+            "path": str(local),
+            "filename": local.name,
+            "mtime": stat.st_mtime,
+            "size": stat.st_size,
+            "token": str(int(stat.st_mtime * 1000)),
+        }
+        self.hub.update("guide_image", self.guide_field)
+
+        # Delete the previous prompt's file now that this one has landed.
+        prompted = list(self._prompted_guide_saves)
+        keep = prompted[-2:]  # the one just saved + the one before as overlap
+        for old in prompted[:-2]:
+            if old in keep:
+                continue
+            with contextlib.suppress(OSError):
+                os.unlink(old)
+        while True:
+            await asyncio.sleep(self.config.tuning.tick_interval_s)
+            try:
+                result = await self.advisor.tick(
+                    conditions=self.conditions(),
+                    stats=self.buffer.recent(300.0, self.exclusions.intervals),
+                    buffer=self.buffer,
+                    exclusions=self.exclusions.intervals,
+                    nina_flipping=self.nina_flipping,
+                    nina_autofocusing=self.nina_autofocusing,
+                )
+                if result.action in ("baseline", "llm"):
+                    await self._close_and_reopen_epoch("param_change")
+                self.hub.update("advisor", self.advisor.status())
+            except Exception:  # noqa: BLE001 - a bad tick must not kill the loop
+                log.exception("advisor tick failed")
+
     # ── snapshot ───────────────────────────────────────────────────────
 
     def snapshot(self) -> dict:
@@ -658,6 +796,8 @@ class Runtime:
         self.hub.state["phd2"] = self.phd2.state.as_dict()
         self.hub.state["advisor"] = self.advisor.status()
         self.hub.state["health"] = self.supervisor.snapshot()
+        if self.guide_field is not None:
+            self.hub.state["guide_image"] = self.guide_field
         self.hub.state["session"] = {
             "session_id": self.session_id,
             "rig_id": self.rig_id,

@@ -177,8 +177,11 @@ class Phd2Client:
     async def run(self) -> None:
         """Connect, seed state, and pump the reader until the socket closes."""
         log.info("connecting to PHD2 at %s:%d", self.host, self.port)
+        # get_star_image at PHD2's 255px cap is a ~170KB base64 line, far over
+        # StreamReader's 64KB default chunk; give the line-based protocol
+        # enough headroom that the largest legitimate message always parses.
         self._reader, self._writer = await asyncio.wait_for(
-            asyncio.open_connection(self.host, self.port),
+            asyncio.open_connection(self.host, self.port, limit=1024 * 512),
             timeout=self.connect_timeout,
         )
         self.state.connected = True
@@ -343,6 +346,13 @@ class Phd2Client:
             asyncio.create_task(self._safe_refresh_params())
         elif event == "GuideStep" and self.state.guiding_since_mono is None:
             self.state.guiding_since_mono = now
+            if not self.state.algo_params:
+                # The initial seed can race PHD2's own startup: `get_app_state`
+                # already says "Guiding" but the guider's algorithm objects
+                # are not wired up yet, so `get_algo_param_names` comes back
+                # empty and nothing ever asks again. An actual GuideStep is
+                # proof the algorithms are live, so retry once here.
+                asyncio.create_task(self._safe_refresh_params())
 
         if self._on_event:
             try:
@@ -497,12 +507,14 @@ class Phd2Client:
 
     async def get_star_image(self, size: int = 15) -> dict:
         """
-        The guide camera's crop around the current star.
+        The guide camera's crop around the current lock position.
 
         PHD2 returns ``{frame, width, height, star_pos, pixels}`` where
-        ``pixels`` is base64 little-endian uint16. It errors when nothing is
-        selected or the camera is not looping, which is a normal state and not
-        worth logging -- callers surface it as "no star".
+        ``pixels`` is base64 little-endian uint16. Real PHD2 clamps the crop
+        to 63x63 regardless of how large `size` is, so anything above that is
+        asking for the same image with extra protocol cost. The call errors
+        when nothing is selected or the camera is not looping, which is a
+        normal state and not worth logging -- callers surface it as "no star".
         """
         result = await self.call("get_star_image", {"size": max(15, int(size))})
         if not isinstance(result, dict):
@@ -548,7 +560,15 @@ class Phd2Client:
             for name in names:
                 try:
                     params[(axis, name)] = await self.get_algo_param(axis, name)
-                except Phd2Error as exc:
+                except (Phd2Error, Phd2Disconnected, ValueError, TypeError) as exc:
+                    # Phd2Disconnected (a ConnectionError) is not a Phd2Error
+                    # (a RuntimeError), and PHD2 can list a name (e.g. the
+                    # algorithm's own name, such as "Hysteresis") whose value
+                    # is not numeric, which fails the float() conversion with
+                    # a plain ValueError. Missing any of these here meant one
+                    # bad parameter aborted this whole function via the
+                    # caller's blanket exception suppression, silently
+                    # discarding every param already gathered.
                     log.debug("skipping %s.%s: %s", axis, name, exc)
         self.state.algo_params = params
         self.state.available_params = available
@@ -558,7 +578,7 @@ class Phd2Client:
         try:
             await self.refresh_algo_params()
         except Exception as exc:  # noqa: BLE001
-            log.debug("param refresh after ConfigurationChange failed: %s", exc)
+            log.warning("algo param refresh failed: %s", exc)
 
     async def _seed_state(self) -> None:
         """
@@ -586,8 +606,7 @@ class Phd2Client:
             equipment = await self.call("get_current_equipment")
             if isinstance(equipment, dict):
                 self.state.equipment = equipment
-        with contextlib.suppress(Exception):
-            await self.refresh_algo_params()
+        await self._safe_refresh_params()
         log.info(
             "PHD2 seeded: state=%s scale=%s params=%d",
             self.state.app_state,

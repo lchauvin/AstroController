@@ -45,6 +45,10 @@ class GuideSample:
     dec_limited: bool = False
     ra_duration_ms: float = 0.0
     dec_duration_ms: float = 0.0
+    ra_dir: int = 0
+    """Correction direction: +1 East, -1 West, 0 no move."""
+    dec_dir: int = 0
+    """Correction direction: +1 North, -1 South, 0 no move."""
 
     @property
     def total_arcsec(self) -> float:
@@ -112,6 +116,18 @@ def _rms(values: Iterable[float]) -> float:
     if not vals:
         return float("nan")
     return math.sqrt(sum(v * v for v in vals) / len(vals))
+
+
+def _dir(value) -> int:
+    """PHD2's direction field -> a signed unit. +1 East/North, -1 West/South."""
+    if not isinstance(value, str):
+        return 0
+    key = value.strip().lower()
+    if key in ("east", "north"):
+        return 1
+    if key in ("west", "south"):
+        return -1
+    return 0
 
 
 def compute_rms(
@@ -211,6 +227,8 @@ class GuideBuffer:
             dec_limited=bool(payload.get("DecLimited", False)),
             ra_duration_ms=float(payload.get("RADuration", 0.0) or 0.0),
             dec_duration_ms=float(payload.get("DECDuration", 0.0) or 0.0),
+            ra_dir=_dir(payload.get("RADirection")),
+            dec_dir=_dir(payload.get("DECDirection")),
         )
         self._samples.append(sample)
         self._prune(now)
@@ -287,5 +305,9 @@ class GuideBuffer:
             "ra": [round(s.ra_arcsec, 3) for s in pts],
             "dec": [round(s.dec_arcsec, 3) for s in pts],
             "snr": [round(s.snr, 1) for s in pts],
+            "ra_corr_ms": [round(s.ra_duration_ms, 1) for s in pts],
+            "dec_corr_ms": [round(s.dec_duration_ms, 1) for s in pts],
+            "ra_dir": [s.ra_dir for s in pts],
+            "dec_dir": [s.dec_dir for s in pts],
             "pixel_scale": self.pixel_scale,
         }

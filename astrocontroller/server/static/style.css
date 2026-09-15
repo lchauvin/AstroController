@@ -189,10 +189,11 @@ code { font-family: var(--mono); font-size: .92em; color: var(--text-2); }
 #page-dashboard .grid {
   grid-template-rows: minmax(0, 1.5fr) minmax(0, 1fr);
 }
-/* Guiding: the trace row (with the star beside it) is the heavier one; the
-   parameters/advisor/polar row clips internally below it. */
+/* Guiding: the error trace is the heaviest row, the correction trace below it
+   a shorter echo of the same timeline, and the star/parameters/advisor row
+   clips internally at the bottom. */
 #page-guiding .grid {
-  grid-template-rows: minmax(0, 1.35fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1.3fr) minmax(0, 0.7fr) minmax(0, 1fr);
 }
 /* Settings content is data-driven and can be long: cards size to their
    content (top-aligned, natural height) and the page scrolls if they exceed
@@ -222,6 +223,7 @@ code { font-family: var(--mono); font-size: .92em; color: var(--text-2); }
 #page-settings .grid > .card:last-child { margin-bottom: 0; }
 #page-settings .grid + .grid { margin-top: var(--space-4); }
 
+.span-3 { grid-column: span 3; }
 .span-4 { grid-column: span 4; }
 .span-5 { grid-column: span 5; }
 .span-6 { grid-column: span 6; }
@@ -378,6 +380,7 @@ input[type="text"], input[type="number"] { font-family: var(--mono); }
 .chart-legend { flex: none; display: flex; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-2); font-size: 12px; color: var(--text-2); }
 .chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .chart-legend i { width: 11px; height: 2px; background: currentColor; flex: none; }
+.chart-legend i.bar { width: 4px; height: 11px; background: currentColor; }
 .chart-legend b { font-family: var(--mono); font-weight: 600; color: var(--text); }
 
 .chart-tip {
@@ -499,6 +502,80 @@ input[type="text"], input[type="number"] { font-family: var(--mono); }
    match its width and centring so it sits under the box, not beside it. */
 .starbox + .card-note { max-width: 260px; margin: var(--space-2) auto 0; text-align: center; }
 
+/* ── sequence tree (dashboard) ───────────────────────────────────── */
+
+/* The current step sits full-width above the list so the eye lands on it
+   first; the tree below is the night's plan at glanceable resolution. */
+.seq-current {
+  flex: none;
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--panel-2);
+  border-left: 2px solid var(--color-accent);
+}
+.seq-current-label {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .09em; color: var(--muted);
+  margin-bottom: 2px;
+}
+.seq-tree {
+  flex: 1; min-height: 0; overflow-y: auto;
+  font-size: 12px;
+  /* Indent scale: one connector column per nesting level. */
+  --tree-indent: 16px;
+}
+.seq-tree .step {
+  display: flex; align-items: baseline; gap: var(--space-2);
+  padding: 2px var(--space-2) 2px 0;
+  white-space: nowrap;
+}
+.seq-tree .status {
+  font-family: var(--mono); font-size: 9px; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--muted); margin-left: auto; padding-left: var(--space-2);
+}
+.seq-tree .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.seq-tree .step-sub {
+  font-size: 10px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+/* Connector column: draws the vertical rail (or its absence) between a
+   container's first row and its last child. */
+.seq-tree .guide { flex: none; width: var(--tree-indent); height: 14px; position: relative; align-self: stretch; }
+.seq-tree .guide.rail::before,
+.seq-tree .guide.tee::before,
+.seq-tree .guide.corner::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 5px;
+  border-left: 1px solid var(--line-soft);
+}
+.seq-tree .guide.corner::before { bottom: 50%; }
+.seq-tree .guide.tee::after,
+.seq-tree .guide.corner::after {
+  content: ""; position: absolute; top: 50%; left: 5px; width: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+.seq-tree .guide.tee::before { bottom: 0; }
+/* Leaf marker: a single dot reads quieter than a hollow square beside the
+   containers' loop/block markers. */
+.seq-tree .step-dot {
+  flex: none; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--muted); align-self: center; margin: 0 4px 0 5px;
+}
+.seq-tree .step-marker {
+  flex: none; width: 15px; height: 15px; align-self: center;
+  display: grid; place-items: center;
+  border: 1px solid var(--line);
+  background: var(--panel-3); color: var(--muted);
+}
+.seq-tree .step-marker svg { width: 10px; height: 10px; }
+.seq-tree .step-marker.loop { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); }
+.seq-tree .container .name { color: var(--text-2); font-weight: 550; }
+.seq-tree .running { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.seq-tree .running .status { color: var(--color-accent); }
+.seq-tree .finished .status { color: var(--good-ink); }
+.seq-tree .skipped { opacity: .55; }
+.seq-tree .failed { background: color-mix(in srgb, var(--critical) 12%, transparent); }
+.seq-tree .failed .status { color: var(--critical-ink); }
+
 /* ── equipment ───────────────────────────────────────────────────── */
 
 .equipment { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: var(--space-2); overflow: auto; min-height: 0; }
@@ -545,6 +622,8 @@ input[type="text"], input[type="number"] { font-family: var(--mono); }
 .tag.baseline { color: var(--series-3); }
 .tag.llm { color: var(--series-1); }
 .tag.manual { color: var(--series-2); }
+.tag.vetoed { color: var(--warn); }
+.tag.error { color: var(--critical); }
 
 table.kv, table.params, table.rows { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.kv td, table.params td, table.rows td, table.rows th { padding: var(--space-2) 4px; border-bottom: 1px solid var(--line-soft); }
@@ -611,13 +690,6 @@ table.params input { width: 92px; text-align: right; }
 .progress-now { font-family: var(--font-heading); font-size: 15px; font-weight: var(--font-heading-weight); letter-spacing: .03em; }
 .progress-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
-.bar { height: 5px; background: var(--panel-3); overflow: hidden; margin: var(--space-3) 0; }
-.bar > div { height: 100%; width: 0; background: var(--color-accent); transition: width .4s; }
-
-.pa-errors { display: flex; gap: var(--space-6); margin: 4px 0 var(--space-3); }
-.pa-errors b { font-family: var(--font-heading); font-size: 22px; font-weight: var(--font-heading-weight); }
-.pa-errors label { display: block; font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-
 .moon-row { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); font-size: 12px; color: var(--text-2); }
 .moon-row svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
 
@@ -654,6 +726,27 @@ table.params input { width: 92px; text-align: right; }
 
 .pair-inputs { display: flex; gap: var(--space-2); }
 .pair-inputs input { width: 90px; }
+
+/* The dashboard guiding card shows PHD2's widest available view (the lock
+   region, up to 255px) rather than the tight star crop, so the box fills the
+   column and the PNG is contain-fitted inside it. */
+.guideview {
+  position: relative;
+  flex: 1; min-height: 0;
+  aspect-ratio: 1;
+  width: 100%;
+  background: var(--mount);
+  border: 1px solid var(--line-soft);
+  overflow: hidden;
+}
+.guideview img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.guideview img:not([src]) { display: none; }
+#card-guidestar .metric-row { justify-content: center; gap: var(--space-4); }
 
 /* ── toasts ──────────────────────────────────────────────────────── */
 

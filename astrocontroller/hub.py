@@ -58,6 +58,7 @@ class TelemetryHub:
             "phd2": {"connected": False},
             "sequence": {"available": False, "steps": []},
             "guiding": {},
+            "guide_image": None,
             "frames": [],
             "preview": {"available": False, "source": None},
             "weather": {},

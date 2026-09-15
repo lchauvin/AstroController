@@ -93,6 +93,18 @@ FIELDS: tuple[Field, ...] = (
           help="A folder this machine can read that NINA writes frames into "
                "(an SMB share works). Used for the live frame preview.",
           placeholder="G:/Astro/.Download"),
+    Field("guide_camera", "enabled", "Guide field dumps", "bool", live=True,
+          help="Ask PHD2 to save the guide camera frame as a FITS on a timer "
+               "and show it on the dashboard. PHD2 has to write into "
+               "<share>/<subdir>; each prompted file is deleted once the next "
+               "has landed."),
+    Field("guide_camera", "interval_s", "Dump interval", "number",
+          "Seconds between PHD2 save_image calls. PHD2's own save is not "
+          "instant, so below ~4s the panel would strobe.",
+          live=True, minimum=4, maximum=120, step=1),
+    Field("guide_camera", "share_subdir", "Guide subfolder", "text", live=True,
+          help="Subfolder of the image share where PHD2's saves land.",
+          placeholder="guide"),
 
     # -- weather --------------------------------------------------------
     Field("weather", "enabled", "Forecast", "bool", live=True,
@@ -158,7 +170,9 @@ GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
      ("nina.host", "nina.port", "phd2.host", "phd2.instance",
       "nina.poll_interval_s", "nina.timeout_s")),
     ("site", "Observing site", ("site.latitude", "site.longitude", "site.elevation_m")),
-    ("images", "Images", ("images.share_path",)),
+    ("images", "Images",
+     ("images.share_path", "guide_camera.enabled", "guide_camera.interval_s",
+      "guide_camera.share_subdir")),
     ("weather", "Weather",
      ("weather.enabled", "weather.poll_interval_s", "weather.forecast_days")),
     ("advisor", "Advisor",
@@ -255,7 +269,7 @@ def coerce(field: Field, value: Any) -> Any:
         raise ConfigError(
             f"{field.path} must be one of {', '.join(field.choices)}"
         )
-    if field.kind == "text" and not text and field.key not in ("share_path",):
+    if field.kind == "text" and not text and field.key not in ("share_path", "share_subdir"):
         raise ConfigError(f"{field.path} cannot be empty")
     return text
 

@@ -39,6 +39,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 log = logging.getLogger(__name__)
 
 
+class _FakeRpcError(Exception):
+    """An error the fake PHD2 returns as a JSON-RPC error object."""
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
 @dataclass
 class SimState:
     """Shared physical truth behind both fake servers."""
@@ -287,6 +296,8 @@ class FakePhd2Server:
         self.sim = sim
         self.host = host
         self.port = port
+        self.save_dir: Optional[str] = None
+        """Where save_image drops its FITS, when a caller has told us."""
         self._server: Optional[asyncio.Server] = None
         self._clients: list[asyncio.StreamWriter] = []
 
@@ -333,70 +344,126 @@ class FakePhd2Server:
         sim = self.sim
         result: Any = 0
 
-        if method == "get_pixel_scale":
-            result = sim.pixel_scale
-        elif method == "get_app_state":
-            result = sim.app_state
-        elif method == "get_exposure":
-            result = sim.exposure_ms
-        elif method == "get_paused":
-            result = False
-        elif method == "get_dec_guide_mode":
-            result = "Auto"
-        elif method == "get_connected":
-            result = True
-        elif method == "get_profile":
-            result = {"id": 1, "name": "Simulated Rig"}
-        elif method == "get_current_equipment":
-            result = {
-                "camera": {"name": "Sim Guide Cam", "connected": True},
-                "mount": {"name": "Simulated Mount", "connected": True},
-            }
-        elif method == "get_algo_param_names":
-            axis = params[0] if params else "ra"
-            result = (
-                ["minMove", "hysteresis", "aggression"]
-                if axis == "ra"
-                else ["minMove", "aggression"]
-            )
-        elif method == "get_algo_param":
-            result = self._get_param(params[0], params[1])
-        elif method == "set_algo_param":
-            self._set_param(params[0], params[1], float(params[2]))
-        elif method == "dither":
-            asyncio.create_task(self._do_settle(dithered=True))
-        elif method == "guide":
-            sim.app_state = "Guiding"
-            asyncio.create_task(self._do_settle(dithered=False))
-        elif method == "stop_capture":
-            sim.app_state = "Stopped"
-            asyncio.create_task(self._broadcast({"Event": "GuidingStopped"}))
-        elif method == "loop":
-            sim.app_state = "Looping"
-        elif method == "set_paused":
-            paused = bool(params[0]) if params else False
-            sim.app_state = "Paused" if paused else "Guiding"
-            asyncio.create_task(
-                self._broadcast({"Event": "Paused" if paused else "Resumed"})
-            )
-        elif method == "clear_calibration":
-            result = 0
-        elif method == "get_star_image":
-            size = 15
-            if isinstance(params, dict):
-                size = int(params.get("size", 15))
-            elif params:
-                size = int(params[0])
-            image = _synthetic_star(sim, max(15, size))
-            if image is None:
+        try:
+            if method == "get_pixel_scale":
+                result = sim.pixel_scale
+            elif method == "get_app_state":
+                result = sim.app_state
+            elif method == "get_exposure":
+                result = sim.exposure_ms
+            elif method == "get_paused":
+                result = False
+            elif method == "get_dec_guide_mode":
+                result = "Auto"
+            elif method == "get_connected":
+                result = True
+            elif method == "save_image":
+                result = self._save_image()
+            elif method == "get_profile":
+                result = {"id": 1, "name": "Simulated Rig"}
+            elif method == "get_current_equipment":
+                result = {
+                    "camera": {"name": "Sim Guide Cam", "connected": True},
+                    "mount": {"name": "Simulated Mount", "connected": True},
+                }
+            elif method == "get_algo_param_names":
+                axis = params[0] if params else "ra"
+                result = (
+                    ["minMove", "hysteresis", "aggression"]
+                    if axis == "ra"
+                    else ["minMove", "aggression"]
+                )
+            elif method == "get_algo_param":
+                result = self._get_param(params[0], params[1])
+            elif method == "set_algo_param":
+                self._set_param(params[0], params[1], float(params[2]))
+            elif method == "dither":
+                asyncio.create_task(self._do_settle(dithered=True))
+            elif method == "guide":
+                sim.app_state = "Guiding"
+                asyncio.create_task(self._do_settle(dithered=False))
+            elif method == "stop_capture":
+                sim.app_state = "Stopped"
+                asyncio.create_task(self._broadcast({"Event": "GuidingStopped"}))
+            elif method == "loop":
+                sim.app_state = "Looping"
+            elif method == "set_paused":
+                paused = bool(params[0]) if params else False
+                sim.app_state = "Paused" if paused else "Guiding"
+                asyncio.create_task(
+                    self._broadcast({"Event": "Paused" if paused else "Resumed"})
+                )
+            elif method == "clear_calibration":
+                result = 0
+            elif method == "get_star_image":
+                size = 15
+                if isinstance(params, dict):
+                    size = int(params.get("size", 15))
+                elif params:
+                    size = int(params[0])
+                image = _synthetic_star(sim, max(15, size))
+                if image is None:
+                    return {"jsonrpc": "2.0", "id": req.get("id"),
+                            "error": {"code": 1, "message": "no star selected"}}
+                result = image
+            else:
                 return {"jsonrpc": "2.0", "id": req.get("id"),
-                        "error": {"code": 1, "message": "no star selected"}}
-            result = image
-        else:
+                        "error": {"code": -32601, "message": f"unknown method {method}"}}
+        except _FakeRpcError as exc:
             return {"jsonrpc": "2.0", "id": req.get("id"),
-                    "error": {"code": -32601, "message": f"unknown method {method}"}}
+                    "error": {"code": exc.code, "message": exc.message}}
 
         return {"jsonrpc": "2.0", "id": req.get("id"), "result": result}
+
+    def _save_image(self) -> dict:
+        """
+        save_image over the wire: one synthetic FITS per call, named as PHD2
+        names them. Without astropy this errors -- the same as PHD2 with no
+        imaging gear -- and the dashboard's field panel simply stays on the
+        tight live crop.
+        """
+        try:
+            import numpy as np
+            from astropy.io import fits
+        except ImportError:
+            raise _FakeRpcError(1, "save_image unavailable (no astropy)")
+        if self.save_dir is None:
+            raise _FakeRpcError(1, "no save directory configured")
+        if self.sim.app_state not in ("Guiding", "Looping", "Paused"):
+            raise _FakeRpcError(1, "cannot save when not capturing")
+
+        sim = self.sim
+        size = 320
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"PhdGuider1_{stamp}.fits"
+        path = Path(self.save_dir) / filename
+
+        rng = np.random.default_rng(sim.frame * 7919 + 13)
+        image = 900.0 + rng.normal(0, 18.0, (size, size))
+        # A guide camera's field: one bright guide star and a handful of dim
+        # companions, so the frame reads as a field rather than a crop.
+        cx, cy = size / 2, size / 2
+        stars = [(cx, cy, 24000.0)] + [
+            (rng.uniform(20, size - 20), rng.uniform(20, size - 20),
+             float(rng.uniform(600, 4000))) for _ in range(9)
+        ]
+        ys, xs = np.mgrid[0:size, 0:size]
+        sigma = max(1.2, sim.seeing_arcsec / sim.pixel_scale / 2.355)
+        for x0, y0, peak in stars:
+            image += peak * np.exp(-(((xs - x0) ** 2 + (ys - y0) ** 2) / (2 * sigma**2)))
+
+        header = fits.Header()
+        header["IMAGETYP"] = "LIGHT"
+        header["EXPOSURE"] = sim.exposure_ms / 1000.0
+        header["INSTRUME"] = "Sim Guide Cam"
+        header["TELESCOP"] = "Sim Guide Scope"
+        header["XBINNING"] = 1
+        header["DATE-OBS"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        fits.PrimaryHDU(data=np.clip(image, 0, 65535).astype(np.uint16), header=header).writeto(
+            path, overwrite=True
+        )
+        log.info("[sim] save_image -> %s", path.name)
+        return {"filename": str(path)}
 
     def _get_param(self, axis: str, name: str) -> float:
         sim = self.sim

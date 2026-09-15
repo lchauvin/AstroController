@@ -1,11 +1,11 @@
 /* The Guiding page.
  *
- * Live guiding under the microscope: the guide star crop, the guiding error
- * and RMS over the last ten minutes, the PHD2 parameters (editable), the
- * advisor that suggests -- or applies -- tuning changes, and the polar
- * alignment quality. Renderers are "state in, DOM out" against the topics they
- * read; the star crop is the exception, polled on a timer because it is a
- * synchronous round trip into PHD2 (see pollStar).
+ * Live guiding under the microscope: the guiding error and correction traces
+ * over the last ten minutes, the guide star crop, the PHD2 parameters
+ * (editable), and the advisor that suggests -- or applies -- tuning changes.
+ * Renderers are "state in, DOM out" against the topics they read; the star
+ * crop is the exception, polled on a timer because it is a synchronous round
+ * trip into PHD2 (see pollStar).
  */
 "use strict";
 
@@ -70,7 +70,21 @@ function renderTiles() {
 
 /* ── guide trace ─────────────────────────────────────────────────── */
 
-let guideChart = null;
+// Fixed, zero-centred bounds for both trace charts. A dither is several
+// arcseconds -- an order of magnitude past normal guiding error -- and an
+// auto-scaled axis stretches to fit it, squashing the real error down to a
+// flat line for the ten minutes it takes to scroll off. Clipping the dither
+// instead keeps the axis meaningful for the error the panel exists to show.
+const ERROR_RANGE_ARCSEC = 3.0;
+const CORR_RANGE_MS = 1200;
+
+// Both charts share this key so hovering either one moves both crosshairs:
+// error and correction are the same guide steps, split into two charts
+// because a shared axis made the busier one (corrections) drown the other.
+const TRACE_SYNC_KEY = "guide-trace";
+
+let errorChart = null;
+let corrChart = null;
 
 function renderTrace() {
   const phd2 = state.phd2 || {};
@@ -89,22 +103,28 @@ function renderTrace() {
     }
   }
 
-  const pause = $("pause-button");
-  if (pause) pause.textContent = phd2.paused ? "Resume" : "Pause";
-
   drawTrace(guiding.graph);
 }
 
 function drawTrace(graph) {
+  drawErrorChart(graph);
+  drawCorrChart(graph);
+}
+
+function drawErrorChart(graph) {
   const host = $("guide-chart");
   if (!host) return;
-  if (!guideChart) {
-    guideChart = new LineChart(host, {
+  if (!errorChart) {
+    errorChart = new LineChart(host, {
       legendEl: $("guide-legend"),
       series: [
         { label: "RA", width: 1.6 },
         { label: "Dec", width: 1.6 },
       ],
+      // Fixed and symmetric about zero -- see ERROR_RANGE_ARCSEC above -- so
+      // the trace never rescales itself out from under the operator.
+      yRange: [-ERROR_RANGE_ARCSEC, ERROR_RANGE_ARCSEC],
+      syncKey: TRACE_SYNC_KEY,
       xLabel: (seconds) => `${Math.abs(Math.round(seconds))}s ago`,
       yLabel: (value) => `${value.toFixed(2)}″`,
       yTicks: (_p, ticks) => ticks.map((t) => t.toFixed(1)),
@@ -112,26 +132,73 @@ function drawTrace(graph) {
     });
   }
   if (!graph || !graph.t || graph.t.length < 2) {
-    guideChart.empty("Waiting for guide steps…");
+    errorChart.empty("Waiting for guide steps…");
     return;
   }
-  guideChart.update([graph.t, graph.ra, graph.dec]);
+  errorChart.update([graph.t, graph.ra, graph.dec]);
+}
+
+function drawCorrChart(graph) {
+  const host = $("guide-corr-chart");
+  if (!host) return;
+  if (!corrChart) {
+    corrChart = new LineChart(host, {
+      legendEl: $("guide-corr-legend"),
+      // Signed bars, PHD2-style: each names its ±1 direction via `sign`. The
+      // "dir" series are pure sign carriers, not drawn or listed themselves.
+      series: [
+        { label: "RA dir", hidden: true },
+        { label: "RA corr", colour: "--series-1", scale: "y", isBar: true, sign: "RA dir" },
+        { label: "Dec dir", hidden: true },
+        { label: "Dec corr", colour: "--series-2", scale: "y", isBar: true, sign: "Dec dir" },
+      ],
+      // Fixed and symmetric about zero -- see CORR_RANGE_MS above -- so a
+      // West pulse hangs as far below as an East pulse rises above.
+      yRange: [-CORR_RANGE_MS, CORR_RANGE_MS],
+      syncKey: TRACE_SYNC_KEY,
+      xLabel: (seconds) => `${Math.abs(Math.round(seconds))}s ago`,
+      yLabel: (value) => `${value.toFixed(0)} ms`,
+      yTicks: (_p, ticks) => ticks.map((t) => `${Math.round(t)}ms`),
+      xTicks: (_p, ticks) => ticks.map((t) => `${Math.round(t)}s`),
+    });
+  }
+  if (!graph || !graph.t || graph.t.length < 2) {
+    corrChart.empty("Waiting for guide steps…");
+    return;
+  }
+  corrChart.update([graph.t, graph.ra_dir || [], graph.ra_corr_ms || [], graph.dec_dir || [], graph.dec_corr_ms || []]);
 }
 
 /* ── parameters (editable) ───────────────────────────────────────── */
+
+let paramsEditingUntil = 0;
 
 function renderParams() {
   const phd2 = state.phd2 || {};
   const params = phd2.params || {};
   const host = $("guide-params");
   if (!host) return;
+  // Rebuilding the table mid-edit would tear the field the user is typing
+  // into (and the keystrokes in it) out from under them, so pause renders for
+  // a short window after the last keystroke. A self-expiring timer rather
+  // than an "is anything in here still focused" check: a click on ordinary
+  // page text doesn't blur a focused input, so that check could freeze the
+  // table on stale values indefinitely instead of just during an edit.
+  if (Date.now() < paramsEditingUntil) return;
   const rows = Object.entries(params)
     .map(([name, value]) => {
       const [axis, param] = name.split(".");
+      // PHD2's own Advanced Settings dialog shows aggression as 0-100%; the
+      // RPC value underneath is always the same 0.0-1.0 fraction regardless.
+      // This is purely a display/edit-box convenience -- everything sent to
+      // PHD2 (and everything the advisor reads and bounds-checks) stays the
+      // raw fraction, converted back at submit time in registerGuiding().
+      const isPercent = param === "aggression" || param === "aggressiveness";
+      const displayValue = fmt(isPercent ? value * 100 : value, 2);
       return `<tr>
         <td>${esc(axis)} · ${esc(param)}</td>
-        <td><input type="number" step="0.01" value="${esc(value)}"
-              data-axis="${esc(axis)}" data-param="${esc(param)}"
+        <td><input type="number" step="${isPercent ? "1" : "0.01"}" value="${esc(displayValue)}"
+              data-axis="${esc(axis)}" data-param="${esc(param)}" data-percent="${isPercent ? "1" : "0"}"
               aria-label="${esc(axis)} ${esc(param)}"></td>
       </tr>`;
     })
@@ -141,6 +208,68 @@ function renderParams() {
 }
 
 /* ── advisor ─────────────────────────────────────────────────────── */
+
+// Friendly labels for the raw codes the backend uses internally. Anything
+// missing here falls back to `humanize()` rather than showing the bare code.
+const ADVISOR_ACTION_LABEL = {
+  idle: "Idle",
+  hold: "Holding",
+  baseline: "Baseline",
+  llm: "Model",
+  vetoed: "Refused",
+  error: "Error",
+};
+
+const ADVISOR_SOURCE_LABEL = {
+  baseline: "Baseline",
+  llm: "Model",
+  manual: "Manual",
+};
+
+const VETO_LABEL = {
+  mode: "Tuning mode",
+  kill_switch: "Arm switch off",
+  phd2_disconnected: "PHD2 disconnected",
+  phd2_stale: "PHD2 stale",
+  not_guiding: "Not guiding",
+  paused: "Guiding paused",
+  calibrating: "Calibrating",
+  settling: "Settling",
+  settle_guard: "Settle guard",
+  dither_guard: "Dither guard",
+  meridian_flip: "Meridian flip",
+  autofocus: "Autofocus",
+  star_lost: "Star lost",
+  disturbed: "Disturbed",
+  unknown_param: "Unknown parameter",
+  param_unavailable: "Parameter unavailable",
+  frozen: "Parameter frozen",
+  out_of_range: "Out of range",
+  no_current_value: "No current value",
+  direction_lock: "Direction locked",
+  trial_open: "Measuring",
+  cooldown: "Cooldown",
+  global_cooldown: "Global cooldown",
+  hourly_budget: "Hourly budget",
+  session_budget: "Session budget",
+  no_baseline: "No baseline",
+  no_baseline_window: "No baseline window",
+  not_stable_yet: "Not stable yet",
+  insufficient_data: "Insufficient data",
+  no_change: "No change needed",
+};
+
+/** Fallback for any code missing from the maps above: "not_guiding" -> "Not guiding". */
+function humanize(code) {
+  const text = String(code || "").replace(/_/g, " ").trim();
+  return text ? text[0].toUpperCase() + text.slice(1) : "";
+}
+
+/** Capitalize the first letter, leaving backend/LLM punctuation as given. */
+function cap(text) {
+  const trimmed = String(text || "").trim();
+  return trimmed ? trimmed[0].toUpperCase() + trimmed.slice(1) : "";
+}
 
 function renderAdvisor() {
   const advisor = state.advisor || {};
@@ -154,14 +283,26 @@ function renderAdvisor() {
   if (mode && document.activeElement !== mode) mode.value = advisor.mode || "off";
 
   const last = advisor.last;
-  if ($("advisor-last")) $("advisor-last").textContent = last ? `${last.action}: ${last.detail}` : "Waiting for the first tick…";
+  if ($("advisor-last")) {
+    if (!last) {
+      $("advisor-last").textContent = "Waiting for the first tick…";
+    } else if (last.action === "llm" && last.proposal && !/^applied /i.test(last.detail || "")) {
+      // A suggestion that was not applied: show the proposal itself, not just
+      // "suggestion only". This is the whole point of Suggest mode.
+      const p = last.proposal;
+      $("advisor-last").innerHTML = `${esc(cap(last.detail))} — would set <b>${esc(p.axis)}.${esc(p.param)} = ${esc(fmt(p.value))}</b>`;
+    } else {
+      const actionLabel = ADVISOR_ACTION_LABEL[last.action] || humanize(last.action);
+      $("advisor-last").innerHTML = `<span class="tag ${esc(last.action)}">${esc(actionLabel)}</span> ${esc(cap(last.detail))}`;
+    }
+  }
 
   const changes = (advisor.changes || [])
     .map(
       (c) => `<div class="row ${c.reverted ? "is-muted" : ""}">
-        <span class="tag ${esc(c.source)}">${esc(c.source)}</span>
+        <span class="tag ${esc(c.source)}">${esc(ADVISOR_SOURCE_LABEL[c.source] || humanize(c.source))}</span>
         <span class="mono">${esc(c.axis)}.${esc(c.param)} ${esc(c.before)}→${esc(c.applied)}</span>
-        <span class="grow">${esc(c.rationale || "")}</span>
+        <span class="grow">${esc(cap(c.rationale))}</span>
       </div>`
     )
     .join("");
@@ -172,29 +313,13 @@ function renderAdvisor() {
     (advisor.vetoes || [])
       .map(
         (v) => `<div class="row">
-          <span class="mono" style="color:var(--warn)">${esc(v.rule)}</span>
-          <span class="grow">${esc(v.detail)}</span>
+          <span class="tag vetoed">${esc(VETO_LABEL[v.rule] || humanize(v.rule))}</span>
+          <span class="grow">${esc(cap(v.detail))}</span>
         </div>`
       )
       .join(""),
     "Nothing refused."
   );
-}
-
-/* ── polar alignment (TPPA) ──────────────────────────────────────── */
-
-function renderTppa() {
-  const pa = state.tppa || {};
-  // The plugin reports degrees; arcminutes are what you adjust by at the mount.
-  const minutes = (deg) => (deg === undefined || deg === null ? DASH : fmt(deg * 60, 1));
-  if ($("pa-az")) $("pa-az").textContent = minutes(pa.AzimuthError);
-  if ($("pa-alt")) $("pa-alt").textContent = minutes(pa.AltitudeError);
-  if ($("pa-total")) $("pa-total").textContent = minutes(pa.TotalError);
-  if ($("pa-bar")) $("pa-bar").style.width = `${Math.round((pa.Progress || 0) * 100)}%`;
-  if ($("pa-status")) $("pa-status").textContent = pa.Status || (pa.running ? "Running…" : "Idle");
-  if ($("pa-start")) $("pa-start").disabled = !!pa.running;
-  if ($("pa-stop")) $("pa-stop").disabled = !pa.running;
-  setPill("pa-pill", pa.running ? "running" : "idle", pa.running ? "good" : "");
 }
 
 /* ── the guide star crop ─────────────────────────────────────────── */
@@ -275,17 +400,32 @@ export function registerGuiding() {
   on(["phd2", "guiding"], "guide-trace", renderTrace);
   on(["phd2"], "guide-params", renderParams);
   on(["advisor"], "advisor", renderAdvisor);
-  on(["tppa"], "tppa", renderTppa);
 
   decorateMarks("#page-guiding .starbox");
+
+  // Arms renderParams()'s edit grace window the instant a field is focused
+  // (not just on the first keystroke) so a render landing in the gap between
+  // clicking in and typing can't destroy the field before anything is typed,
+  // then keeps extending it on every keystroke for a slow typist.
+  $("guide-params")?.addEventListener("focusin", (event) => {
+    if (event.target.tagName === "INPUT") paramsEditingUntil = Date.now() + 3000;
+  });
+  $("guide-params")?.addEventListener("input", () => {
+    paramsEditingUntil = Date.now() + 3000;
+  });
 
   // A parameter edit goes straight to PHD2, so it commits on blur or Enter
   // rather than on every keystroke.
   $("guide-params")?.addEventListener("change", (event) => {
     const input = event.target;
     if (input.tagName !== "INPUT") return;
+    paramsEditingUntil = 0; // committed -- no reason to keep the table frozen
+    const entered = parseFloat(input.value);
+    // Percent fields are display/edit-box only (see renderParams) -- PHD2 and
+    // the advisor always get the raw 0.0-1.0 fraction back.
+    const value = input.dataset.percent === "1" ? entered / 100 : entered;
     act(null, "/api/guiding/param", {
-      body: JSON.stringify({ axis: input.dataset.axis, param: input.dataset.param, value: parseFloat(input.value) }),
+      body: JSON.stringify({ axis: input.dataset.axis, param: input.dataset.param, value }),
       okMessage: `${input.dataset.axis}.${input.dataset.param} set`,
     });
   });
@@ -298,9 +438,6 @@ export function registerGuiding() {
   });
   $("revert-last")?.addEventListener("click", (e) => act(e.currentTarget, "/api/advisor/revert-last"));
   $("revert-all")?.addEventListener("click", (e) => act(e.currentTarget, "/api/advisor/revert-all"));
-
-  $("pa-start")?.addEventListener("click", (e) => act(e.currentTarget, "/api/tppa/start", { body: JSON.stringify({}) }));
-  $("pa-stop")?.addEventListener("click", (e) => act(e.currentTarget, "/api/tppa/stop"));
 
   // The guide buttons carry data-guide and are handled by the delegated click
   // listener in main.js; only the star crop needs a poller toggle here.

@@ -10,7 +10,7 @@
 "use strict";
 
 import { $, TOKEN, ago, clock, cssVar, duration, esc, fmt, icon, on, prefs, savePrefs, state, url } from "../core.js";
-import { LineChart, progressRing, sparkline } from "../charts.js";
+import { LineChart, sparkline } from "../charts.js";
 import { DASH, decorateMarks, flagChip, listOr, rmsStatus, setPill, tile } from "../widgets.js";
 
 const authHeaders = TOKEN ? { "X-Auth-Token": TOKEN } : {};
@@ -108,9 +108,11 @@ function hfrTrend(frame) {
 let glanceChart = null;
 
 /**
- * The dashboard glance chart gets its y-range from the Settings page.
- * The Guiding page keeps auto-scale so the star and its wander are always
- * visible in full; the Dashboard gets a stable, comparable axis instead.
+ * The dashboard glance chart gets its y-range from the Settings page, or
+ * auto-scales when that preference is left blank. The Guiding page's own
+ * trace uses a fixed, zero-centred range unconditionally (see
+ * ERROR_RANGE_ARCSEC in pages/guiding.js) so this glance is the only chart
+ * that ever auto-scales.
  */
 function glanceYRange() {
   if (prefs.guideYmin === null && prefs.guideYmax === null) return null;
@@ -257,6 +259,43 @@ function renderWeather() {
     : "";
 }
 
+const CLOUD_CHART_HOURS = 12;
+
+/**
+ * The current hour plus the next `count - 1`, so the chart always reads as
+ * "the next N hours" rather than the whole multi-day forecast Open-Meteo
+ * returns. Forecast timestamps are local wall-clock strings with no zone
+ * (Open-Meteo's `timezone=auto`), so a bare `Date.parse` reads them as the
+ * browser's local time -- correct as long as the browser and the observing
+ * site share a zone, which holds for this single-site dashboard.
+ */
+function upcomingHours(hourly, count) {
+  if (!hourly.length) return [];
+  const now = Date.now();
+  let start = 0;
+  for (let i = 0; i < hourly.length; i++) {
+    const stamp = Date.parse(hourly[i].time);
+    if (!Number.isNaN(stamp) && stamp <= now) start = i;
+  }
+  return hourly.slice(start, start + count);
+}
+
+// The x-axis plots plain hour indices (0..count-1), not epoch time: the
+// points this chart shows are always exactly one hour apart, so an index
+// domain gets uPlot's default tick spacing to land on whole hours. The
+// points currently on screen live here so the tick formatters -- set up once
+// at chart construction -- can still look up each index's real clock time.
+let cloudPoints = [];
+
+/** Site-local clock time for the forecast hour at this x-axis index. */
+function hourLabel(index) {
+  const point = cloudPoints[Math.round(index)];
+  if (!point) return "";
+  const date = new Date(Date.parse(point.time));
+  if (Number.isNaN(date.getTime())) return "";
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 function drawCloud(hourly) {
   const host = $("cloud-chart");
   if (!host) return;
@@ -269,25 +308,26 @@ function drawCloud(hourly) {
         { label: "Rain", width: 1.4, dash: [4, 3] },
       ],
       yRange: [0, 100],
-      xLabel: (hours) => (hours <= 0 ? "now" : `+${Math.round(hours)}h`),
+      xLabel: hourLabel,
       yLabel: (value) => `${Math.round(value)}%`,
-      xTicks: (_p, ticks) => ticks.map((t) => (t <= 0 ? "now" : `+${Math.round(t)}h`)),
+      xTicks: (_p, ticks) => ticks.map(hourLabel),
       yTicks: (_p, ticks) => ticks.map((t) => `${Math.round(t)}`),
     });
   }
-  if (!hourly.length) {
+  cloudPoints = upcomingHours(hourly, CLOUD_CHART_HOURS);
+  if (!cloudPoints.length) {
     cloudChart.empty("No forecast.");
     return;
   }
   cloudChart.update([
-    hourly.map((_h, i) => i),
-    hourly.map((h) => h.cloud_total),
-    hourly.map((h) => h.cloud_low),
-    hourly.map((h) => h.precip_prob),
+    cloudPoints.map((_h, i) => i),
+    cloudPoints.map((h) => h.cloud_total),
+    cloudPoints.map((h) => h.cloud_low),
+    cloudPoints.map((h) => h.precip_prob),
   ]);
 }
 
-/* ── sequence (compact) ──────────────────────────────────────────── */
+/* ── sequence (current step on top, full tree below) ─────────────── */
 
 function renderSequenceMini() {
   const seq = state.sequence || {};
@@ -297,15 +337,91 @@ function renderSequenceMini() {
     $("dash-seq-current").textContent = message;
     if ($("dash-seq-sub")) $("dash-seq-sub").textContent = "";
     setPill("dash-seq-pill", "idle");
-    $("seq-ring").innerHTML = progressRing(0, 0);
+    $("dash-seq-tree").innerHTML = "";
     return;
   }
 
-  const label = `${seq.done}/${seq.total}`;
-  setPill("dash-seq-pill", label, seq.current_name ? "good" : "");
+  setPill("dash-seq-pill", `${seq.done}/${seq.total}`, seq.current_name ? "good" : "");
   $("dash-seq-current").textContent = seq.current_name || "Between steps";
   if ($("dash-seq-sub")) $("dash-seq-sub").textContent = `${seq.done} of ${seq.total} instructions done`;
-  $("seq-ring").innerHTML = progressRing(seq.done || 0, seq.total || 0);
+
+  renderSequenceTree(seq);
+}
+
+/* The whole sequence as one indent-and-connector tree, not a collapsible
+   outline: the interesting question at 2am is "where in the night am I", and
+   the answer is easier when finished sections are visibly above the running
+   one rather than folded away. Containers are marked with their loop
+   condition so the instruction list reads as the night's plan, not a flat
+   run-on of take-exposure rows. A loop container is one carrying a "Loop" /
+   "Repeat" condition; anything else is a plain block. */
+function renderSequenceTree(seq) {
+  const steps = seq.steps || [];
+  if (!steps.length) {
+    $("dash-seq-tree").innerHTML = `<div class="list-empty">Empty sequence.</div>`;
+    return;
+  }
+
+  // Ancestor-at-depth array tells each row whether a vertical continuation
+  // guide must be drawn at that level: a parent's sibling further down still
+  // owns the rail under it. Rebuilding the flat list each poll is cheap for
+  // the few hundred steps a sequence ever has.
+  const html = [];
+  const hasSiblingBelow = []; // hasSiblingBelow[d] === true → draw rail at depth d
+
+  steps.forEach((step, i) => {
+    // Look ahead for another step at an equal or shallower depth: that ends
+    // this branch, so the connector terminates instead of running on.
+    const next = steps[i + 1];
+    const continuing = !!next && next.depth >= step.depth;
+    hasSiblingBelow.length = step.depth + 1;
+    hasSiblingBelow[step.depth] = continuing;
+
+    const status = (step.status || "").toLowerCase();
+    const cls = [
+      "step",
+      step.is_container ? "container" : "leaf",
+      status === "running" ? "running" : "",
+      status === "finished" ? "finished" : "",
+      status === "skipped" ? "skipped" : "",
+      status === "failed" ? "failed" : "",
+    ].filter(Boolean).join(" ");
+
+    const guides = [];
+    for (let d = 0; d < step.depth; d++) {
+      // A rail that continues past the corner of its own level.
+      guides.push(
+        `<span class="guide ${d < step.depth - 1 ? (hasSiblingBelow[d] ? "rail" : "void") : (continuing ? "tee" : "corner")}"></span>`
+      );
+    }
+
+    const isLoop = step.is_container && (step.conditions || []).some((c) => /loop|repeat/i.test(c));
+    const marker = step.is_container
+      ? `<span class="step-marker ${isLoop ? "loop" : "block"}" title="${esc((step.conditions || []).join(", ") || "container")}">
+           ${isLoop ? `<svg viewBox="0 0 24 24"><use href="#i-loop"/></svg>` : ""}
+         </span>`
+      : `<span class="step-dot"></span>`;
+
+    const sub = isLoop ? `<span class="step-sub">${esc((step.conditions || [])[0] || "")}</span>` : "";
+
+    html.push(
+      `<div class="${cls}" data-step="${esc(step.id)}">
+         ${guides.join("")}${marker}
+         <span class="name">${esc(step.name)}</span>${sub}
+         <span class="status">${esc(step.status || "")}</span>
+       </div>`
+    );
+  });
+
+  const host = $("dash-seq-tree");
+  host.innerHTML = html.join("");
+
+  // Keep the running row in view without yanking the scroll on every poll:
+  // only nudge when the user hasn't scrolled it out of sight on purpose.
+  if (!host.dataset.scrolled) {
+    const running = host.querySelector(".step.running");
+    if (running) running.scrollIntoView({ block: "nearest" });
+  }
 }
 
 /* ── equipment (sidebar rail) ────────────────────────────────────── */
@@ -468,6 +584,133 @@ function renderPreview() {
   loadFrame();
 }
 
+/* ── guide camera field (dashboard) ───────────────────────────────
+ *
+ * The dashboard is the page left open all night, so PHD2's widest available
+ * view -- the lock region, up to its 255px cap -- lives here: a guide star
+ * drifting past neighbours is the first visible symptom of half the failures
+ * that matter. Polled only while this page is on screen, for the same reason
+ * the Guiding page's tight crop is: the request shares a socket with the
+ * guide steps.
+ */
+
+let dashGuideTimer = null;
+let dashGuideUrl = null;
+
+/** What the field is doing right now, in operator terms. */
+function dashGuideState() {
+  const phd2 = state.phd2 || {};
+  const guiding = state.guiding || {};
+  const activity = guiding.activity;
+  const disturbed = guiding.disturbed || [];
+  if (!phd2.connected) return ["offline", "bad"];
+  // The runtime stamps brief states (dither, star lost) with a short expiry so
+  // the word stays up long enough to read; the exclusion reasons cover the
+  // longer ones (settling, paused).
+  if (activity === "star lost" || disturbed.some((d) => d.startsWith("star_lost"))) return ["star lost", "bad"];
+  if (activity === "dithering" || disturbed.some((d) => d.startsWith("dither"))) return ["dithering", "warn"];
+  if (phd2.paused || disturbed.includes("paused")) return ["paused", "warn"];
+  if (phd2.settling || disturbed.includes("settling")) return ["settling", "warn"];
+  if (phd2.calibrating || disturbed.includes("calibrating")) return ["calibrating", "warn"];
+  if (phd2.app_state === "Guiding") return ["guiding", "good"];
+  return [phd2.app_state || "idle", ""];
+}
+
+function renderDashGuideMetrics() {
+  const rms = state.guiding?.rms;
+  const host = $("dash-star-metrics");
+  if (!host) return;
+  host.innerHTML = [
+    ["SNR", rms ? fmt(rms.snr_med, 1) : DASH],
+    ["HFD", rms ? `${fmt(rms.hfd_med)} px` : DASH],
+    ["RMS", rms ? `${fmt(rms.rms_total)}″` : DASH],
+  ]
+    .map(([k, v]) => `<div class="metric"><b>${esc(v)}</b><label>${esc(k)}</label></div>`)
+    .join("");
+
+  const [label, kind] = dashGuideState();
+  setPill("dash-star-state", label, kind);
+}
+
+async function pollDashGuide() {
+  const phd2 = state.phd2 || {};
+  const img = $("dash-guide-image");
+  const empty = $("dash-guide-empty");
+  if (!img) return;
+
+  if (!phd2.connected) {
+    setDashGuideEmpty("PHD2 is not connected");
+    return;
+  }
+
+  // Prefer the full FITS field PHD2 writes via save_image when it exists; the
+  // 63x63 live crop is the fallback while none has landed.
+  const field = state.guide_image;
+  if (field?.token && field.token !== img.dataset.token) {
+    try {
+      const response = await fetch(url("/api/guide-field.png", { width: 900, v: field.token }), { headers: authHeaders });
+      if (response.ok) {
+        const blob = await response.blob();
+        const next = URL.createObjectURL(blob);
+        if (dashGuideUrl) URL.revokeObjectURL(dashGuideUrl);
+        dashGuideUrl = next;
+        img.src = next;
+        img.dataset.token = field.token;
+        empty.hidden = true;
+        return;
+      }
+      // A 404 here just means the dump hasn't landed yet; fall through to the
+      // live crop.
+    } catch (_) {
+      /* network trouble: fall through to the live crop */
+    }
+  }
+
+  try {
+    const response = await fetch(url("/api/guide-view.png"), { headers: authHeaders });
+    if (!response.ok) {
+      let detail = response.status === 404 ? "Not guiding" : `Error ${response.status}`;
+      try {
+        const body = await response.json();
+        if (body?.detail) detail = body.detail;
+      } catch (_) { /* a non-JSON body still has the status */ }
+      setDashGuideEmpty(detail);
+      return;
+    }
+    const blob = await response.blob();
+    const next = URL.createObjectURL(blob);
+    if (dashGuideUrl) URL.revokeObjectURL(dashGuideUrl);
+    dashGuideUrl = next;
+    img.src = next;
+    img.dataset.token = "";
+    empty.hidden = true;
+  } catch (_) {
+    setDashGuideEmpty("No guide image");
+  }
+}
+
+function setDashGuideEmpty(message) {
+  const img = $("dash-guide-image");
+  const empty = $("dash-guide-empty");
+  if (!img || !empty) return;
+  img.removeAttribute("src");
+  empty.hidden = false;
+  empty.textContent = message;
+}
+
+/** Poll only while the Dashboard page is on screen (same discipline as the
+ *  Guiding page's star poll). */
+export function syncDashStarPolling() {
+  const wanted = $("page-dashboard")?.classList.contains("is-active") && document.visibilityState === "visible";
+  if (wanted && !dashGuideTimer) {
+    pollDashGuide();
+    dashGuideTimer = setInterval(pollDashGuide, 2500);
+  } else if (!wanted && dashGuideTimer) {
+    clearInterval(dashGuideTimer);
+    dashGuideTimer = null;
+  }
+}
+
 /* ── wiring ──────────────────────────────────────────────────────── */
 
 export function registerDashboard() {
@@ -478,8 +721,20 @@ export function registerDashboard() {
   on(["weather", "sky"], "weather", renderWeather);
   on(["sequence"], "sequence-mini", renderSequenceMini);
   on(["nina", "phd2"], "equipment", renderEquipment);
+  on(["guiding", "phd2", "guide_image"], "dash-guide", renderDashGuideMetrics);
 
   decorateMarks("#dash-framebox");
+  decorateMarks("#dash-guideview");
+
+  // Scrolling the sequence tree by hand suspends the "follow the running
+  // step" behaviour until it is scrolled back to where the action is.
+  $("dash-seq-tree")?.addEventListener("scroll", (event) => {
+    const el = event.target;
+    const running = el.querySelector(".step.running");
+    el.dataset.scrolled = running ? "1" : "";
+  });
+
+  document.addEventListener("visibilitychange", syncDashStarPolling);
 
   $("dash-frame-refresh")?.addEventListener("click", () => loadFrame({ force: true }));
 

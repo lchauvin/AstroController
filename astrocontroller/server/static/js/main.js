@@ -20,7 +20,7 @@ import {
 import { rethemeAll } from "./charts.js";
 import { registerPanels } from "./panels.js";
 import { loadSettings, registerSettings } from "./settings.js";
-import { refresh as refreshDashboard, registerDashboard } from "./pages/dashboard.js";
+import { refresh as refreshDashboard, registerDashboard, syncDashStarPolling } from "./pages/dashboard.js";
 import { refresh as refreshGuiding, registerGuiding, syncStarPolling } from "./pages/guiding.js";
 
 const PAGES = {
@@ -30,10 +30,10 @@ const PAGES = {
 };
 
 /* Per-page "you just became visible" nudges: a chart drawn into a hidden
-   element has no width to measure, and the guide star is polled only while its
-   page is on screen. */
+   element has no width to measure, and the guide-star crops are polled only
+   while the page showing them is on screen. */
 const PAGE_HOOKS = {
-  dashboard: refreshDashboard,
+  dashboard: () => { refreshDashboard(); syncDashStarPolling(); },
   guiding: () => { refreshGuiding(); syncStarPolling(); },
   settings: () => {},
 };
@@ -83,8 +83,8 @@ function registerControls() {
     } else if (button.id === "night-toggle") {
       setNight(!prefs.night);
     }
-    /* Parameters, advisor tuning/revert and TPPA start/stop are wired directly
-       inside js/pages/guiding.js -- deliberately not here, so the delegated
+    /* Parameters and advisor tuning/revert are wired directly inside
+       js/pages/guiding.js -- deliberately not here, so the delegated
        handler cannot fire them twice. */
   });
 

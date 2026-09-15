@@ -59,6 +59,21 @@ connect_timeout_s = 5.0
 share_path = ""
 max_analysis_seconds = 30.0
 
+[guide_camera]
+# A full-frame view of the guide camera on the dashboard.
+#
+# PHD2's event API has no live full-frame call; instead, on a timer, this
+# process calls `save_image` and serves the FITS PHD2 wrote. PHD2 saves into
+# its own app-data image directory -- share that folder (or a "guide"
+# subfolder of NINA's share) so this machine can read it.
+#
+# Each prompted file is deleted once the next one has landed, so the folder
+# never accumulates; files PHD2 wrote for another reason are never touched.
+enabled = false
+interval_s = 15.0
+# Subfolder of [images].share_path where PHD2's saves land.
+share_subdir = "guide"
+
 [weather]
 enabled = true
 poll_interval_s = 900

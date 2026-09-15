@@ -41,6 +41,7 @@
     <g id="i-dashboard"><rect x="3" y="3" width="7" height="8" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="11" width="7" height="10" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></g>
     <g id="i-guiding"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="1.6"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></g>
     <g id="i-sequence"><path d="M8 5h13M8 12h13M8 19h13"/><circle cx="4" cy="5" r="1.4"/><circle cx="4" cy="12" r="1.4"/><circle cx="4" cy="19" r="1.4"/></g>
+    <g id="i-loop"><path d="M4 12a8 8 0 1 1 2.34 5.66"/><path d="M4 20v-5h5"/></g>
     <g id="i-settings"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.5a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9h-.2a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.4-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5v-.2a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.4l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z"/></g>
     <g id="i-camera"><rect x="2.5" y="6.5" width="19" height="13" rx="2.5"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 6.5l1.4-2.5h4.2l1.4 2.5"/></g>
     <g id="i-mount"><path d="M4 15.5L16.5 6.5"/><path d="M13.5 3.5l5.5 4-2.5 3.5-5.5-4z"/><path d="M6.5 13.5L9 21M6.5 13.5L2.5 20"/></g>
@@ -158,8 +159,8 @@
           <div class="metric-row" id="dash-guide-metrics"></div>
         </section>
 
-        <!-- Row 2: frame quality, sky, and the night's progress. -->
-        <section class="card span-4" id="card-stats">
+        <!-- Row 2: frame quality, sky, the night's progress, and the guide star. -->
+        <section class="card span-3" id="card-stats">
           <header class="card-head">
             <h2>Frame stats</h2>
             <span class="pill" id="frame-verdict">–</span>
@@ -170,7 +171,7 @@
           </div>
         </section>
 
-        <section class="card span-4" id="card-weather">
+        <section class="card span-3" id="card-weather">
           <header class="card-head">
             <h2>Weather &amp; sky</h2>
             <span class="pill" id="weather-pill">–</span>
@@ -181,22 +182,29 @@
           <div class="moon-row" id="moon-info"></div>
         </section>
 
-        <section class="card span-4" id="card-sequence-mini">
+        <section class="card span-3" id="card-guidestar">
+          <header class="card-head">
+            <h2>Guiding</h2>
+            <span class="pill" id="dash-star-state">–</span>
+          </header>
+          <div class="guideview" id="dash-guideview">
+            <img id="dash-guide-image" alt="Guide camera field as seen by PHD2">
+            <div class="framebox-empty" id="dash-guide-empty">No guide image</div>
+          </div>
+          <div class="metric-row" id="dash-star-metrics"></div>
+        </section>
+
+        <section class="card span-3" id="card-sequence-mini">
           <header class="card-head">
             <h2>Sequence</h2>
             <span class="pill" id="dash-seq-pill">–</span>
           </header>
-          <div class="progress-block">
-            <div class="progress-ring" id="seq-ring"></div>
-            <div class="progress-copy">
-              <div class="progress-now" id="dash-seq-current">No sequence loaded</div>
-              <div class="progress-sub" id="dash-seq-sub"></div>
-            </div>
+          <div class="seq-current" id="dash-seq-current-block">
+            <div class="seq-current-label">Current step</div>
+            <div class="progress-now" id="dash-seq-current">No sequence loaded</div>
+            <div class="progress-sub" id="dash-seq-sub"></div>
           </div>
-          <div class="button-row">
-            <button class="btn go" data-seq="start"><svg viewBox="0 0 24 24"><use href="#i-play"/></svg>Start</button>
-            <button class="btn danger" data-seq="stop" data-confirm="Stop the running sequence?"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg>Stop</button>
-          </div>
+          <div class="seq-tree" id="dash-seq-tree"></div>
         </section>
       </div>
     </main>
@@ -209,25 +217,23 @@
       <section class="tiles" id="guide-tiles"></section>
 
       <div class="grid">
-        <section class="card span-8">
+        <section class="card span-12">
           <header class="card-head">
             <h2>Guide trace</h2>
             <span class="pill" id="guide-state">–</span>
           </header>
           <div class="chart-legend" id="guide-legend"></div>
-          <div class="chart" id="guide-chart" style="height:260px"></div>
+          <div class="chart" id="guide-chart"></div>
           <div class="banner warn" id="guide-disturbed-2" hidden></div>
-          <div class="button-row">
-            <button class="btn go" data-guide="start"><svg viewBox="0 0 24 24"><use href="#i-play"/></svg>Guide</button>
-            <button class="btn danger" data-guide="stop" data-confirm="Stop guiding and capture?"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg>Stop</button>
-            <button class="btn" data-guide="dither">Dither</button>
-            <button class="btn" data-guide="pause" id="pause-button">Pause</button>
-            <button class="btn danger" data-guide="clear-calibration"
-                    data-confirm="Clear the guiding calibration? PHD2 will need to recalibrate.">Clear cal</button>
-          </div>
         </section>
 
-        <section class="card span-4">
+        <section class="card span-12">
+          <header class="card-head"><h2>Guide corrections</h2></header>
+          <div class="chart-legend" id="guide-corr-legend"></div>
+          <div class="chart" id="guide-corr-chart"></div>
+        </section>
+
+        <section class="card span-3">
           <header class="card-head">
             <h2>Guide star</h2>
             <span class="pill" id="star-pill">–</span>
@@ -240,7 +246,7 @@
             A round star means the mount is keeping up.</p>
         </section>
 
-        <section class="card span-5">
+        <section class="card span-3">
           <header class="card-head"><h2>Parameters</h2>
             <span class="pill" id="params-pill">–</span>
           </header>
@@ -249,59 +255,48 @@
           <table class="params" id="guide-params"></table>
         </section>
 
-        <section class="card span-7">
-          <header class="card-head">
-            <h2>Advisor</h2>
-            <span class="pill" id="advisor-mode">–</span>
-          </header>
-          <div class="switch-row">
-            <label class="switch">
-              <input type="checkbox" id="tuning-enabled">
-              <span>Auto-apply guiding changes</span>
-            </label>
-            <select id="tuning-mode" class="select">
-              <option value="off">Off</option>
-              <option value="suggest">Suggest only</option>
-              <option value="auto">Auto</option>
-            </select>
-          </div>
-          <div class="advice" id="advisor-last">Waiting for the first tick…</div>
-          <div class="button-row">
-            <button class="btn" id="revert-last" data-confirm="Revert the most recent parameter change?">Revert last</button>
-            <button class="btn danger" id="revert-all"
-                    data-confirm="Restore every guiding parameter to its value at session start?">Revert all</button>
-          </div>
+        <section class="card span-3">
+          <header class="card-head"><h2>Advisor activity</h2></header>
           <h3 class="subhead">Changes this session</h3>
           <div class="list" id="advisor-changes"></div>
           <h3 class="subhead">Recent refusals</h3>
           <div class="list" id="advisor-vetoes"></div>
         </section>
 
-        <section class="card span-4">
+        <section class="card span-3">
           <header class="card-head">
-            <h2>Polar alignment</h2>
-            <span class="pill" id="pa-pill">idle</span>
+            <h2>Advisor</h2>
+            <span class="pill" id="advisor-mode">–</span>
           </header>
-          <p class="card-note">Runs the TPPA plugin in NINA. The panel stays
-            idle when it is not installed.</p>
-          <div class="pa-errors">
-            <div><b id="pa-az">–</b><label>azimuth ′</label></div>
-            <div><b id="pa-alt">–</b><label>altitude ′</label></div>
-            <div><b id="pa-total">–</b><label>total ′</label></div>
+          <div class="switch-row">
+            <label class="switch" title="The final kill switch. Nothing is written to PHD2 unless this is on AND mode is Auto.">
+              <input type="checkbox" id="tuning-enabled">
+              <span>Arm changes</span>
+            </label>
+            <select id="tuning-mode" class="select"
+                    title="Off: do nothing. Suggest: propose but never apply. Auto: may apply when armed.">
+              <option value="off">Off</option>
+              <option value="suggest">Suggest only</option>
+              <option value="auto">Auto</option>
+            </select>
           </div>
-          <div class="bar"><div id="pa-bar"></div></div>
-          <div class="advice" id="pa-status">Idle</div>
+          <p class="card-note">Two separate gates: <b>mode</b> decides whether changes may
+            be applied, the <b>arm</b> switch is the final kill switch. In Suggest mode
+            the arm switch does nothing — nothing is ever written to PHD2.</p>
+          <div class="advice" id="advisor-last">Waiting for the first tick…</div>
           <div class="button-row">
-            <button class="btn go" id="pa-start">Start</button>
-            <button class="btn danger" id="pa-stop">Stop</button>
+            <button class="btn" id="revert-last" data-confirm="Revert the most recent parameter change?">Revert last</button>
+            <button class="btn danger" id="revert-all"
+                    data-confirm="Restore every guiding parameter to its value at session start?">Revert all</button>
           </div>
         </section>
       </div>
     </main>
 
-    <!-- Sequence is folded into the Dashboard's compact panel (T4) and its
-         polar-alignment card into the Guiding page (T5); the standalone page
-         is retired. -->
+    <!-- Sequence is folded into the Dashboard's compact panel (T4); the
+         standalone page is retired. Its polar-alignment card moved to the
+         Guiding page in T5 and is pulled for now (T6) -- the TPPA backend
+         endpoints are still there for when it comes back. -->
 
     <!-- Settings ---------------------------------------------------->
     <main class="page" id="page-settings">
@@ -354,7 +349,7 @@
             <div class="field">
               <label for="pref-guide-ymin">Guiding graph y-range</label>
               <p class="field-help">Fixed min / max for the Dashboard guide trace (arcseconds).
-                Leave empty for auto-scale. The Guiding page always auto-scales.</p>
+                Leave empty for auto-scale. The Guiding page trace is always fixed at ±3″, centred on zero.</p>
             </div>
             <div class="pair-inputs">
               <input type="number" id="pref-guide-ymin" step="0.1" min="-5" max="0" placeholder="auto" aria-label="Minimum y value">

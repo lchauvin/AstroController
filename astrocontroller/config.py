@@ -261,6 +261,27 @@ class StorageConfig:
 
 
 @dataclass
+class GuideCameraConfig:
+    """
+    Periodic full-frame dump of the guide camera for the dashboard field view.
+
+    PHD2's event API has no full-frame image call; `save_image` writes the
+    current guide frame as a FITS into PHD2's image directory, so the runtime
+    asks for one on a timer and serves it from a share. The filenames always
+    include a timestamp, so to keep the share from filling up the runtime
+    deletes each file it prompted once the next one has landed -- it never
+    touches a save it did not itself request, so a manual PHD2 save is safe.
+
+    `share_subdir` is relative to `[images].share_path`; PHD2 has to be
+    configured (or scripted) to save there.
+    """
+
+    enabled: bool = False
+    interval_s: float = 15.0
+    share_subdir: str = "guide"
+
+
+@dataclass
 class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     nina: NinaConfig = field(default_factory=NinaConfig)
@@ -271,6 +292,7 @@ class Config:
     llm: LlmConfig = field(default_factory=LlmConfig)
     tuning: TuningConfig = field(default_factory=TuningConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
+    guide_camera: GuideCameraConfig = field(default_factory=GuideCameraConfig)
     source_path: Optional[str] = None
     """Path the config was loaded from; None when running on defaults."""
     simulated: bool = False
@@ -345,6 +367,7 @@ SECTION_TYPES: dict[str, type] = {
     "llm": LlmConfig,
     "tuning": TuningConfig,
     "storage": StorageConfig,
+    "guide_camera": GuideCameraConfig,
 }
 
 # (owning dataclass name, field name) -> nested dataclass, for the same reason.

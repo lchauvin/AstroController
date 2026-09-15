@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from ..config import Config, ConfigError, load_config
 from ..hub import sse_format
 from ..imaging.preview import PreviewError, StretchOptions
-from ..imaging.star import StarImageError, render_star_png
+from ..imaging.star import StarImageError, render_field_png, render_star_png
 from ..nina.events import TppaSession
 from ..nina.rest import NinaError, NinaUnavailable
 from ..phd2.client import Phd2Disconnected, Phd2Error, Settle
@@ -454,6 +454,84 @@ def create_app(
                 "Cache-Control": "no-store",
                 "X-Star-Pos": f"{meta.get('star_x')},{meta.get('star_y')}",
                 "X-Star-Peak": str(meta.get("peak")),
+            },
+        )
+
+    @app.get("/api/guide-view.png", dependencies=[Depends(require_auth)])
+    async def guide_view() -> Response:
+        """
+        The guide camera's lock region at its widest useful size.
+
+        PHD2's event API has no full-frame RPC; ``get_star_image`` is the only
+        image it serves, and real PHD2 caps that crop at 63x63 around the lock
+        (larger requests are clamped, not honoured). At typical guide scales
+        that is still several arcminutes of field -- enough to see the star as
+        part of its neighbourhood rather than as a lone pixel speck. Errors
+        surface as the state they represent rather than one opaque 404.
+        """
+        rt = runtime()
+        if not rt.phd2.connected:
+            raise HTTPException(status_code=503, detail="PHD2 is not connected")
+        try:
+            payload = await rt.phd2.get_star_image(64)
+            png, meta = await asyncio.to_thread(render_field_png, payload)
+        except Phd2Error as exc:
+            # "no star selected" / "cannot image while stopped" are states,
+            # not server faults.
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (Phd2Disconnected, asyncio.TimeoutError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except StarImageError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(
+            content=png,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Frame": str(meta.get("frame")),
+                "X-View-Size": f"{meta.get('width')}x{meta.get('height')}",
+            },
+        )
+
+    @app.get("/api/guide-field.png", dependencies=[Depends(require_auth)])
+    async def guide_field(
+        width: int = Query(default=900, ge=200, le=2400),
+        background: float = Query(default=0.18, ge=0.02, le=0.6),
+        white: float = Query(default=99.9, ge=90.0, le=100.0),
+        _v: str = Query(default="", alias="v"),
+    ) -> Response:
+        """
+        The full guide-camera frame, dumped by PHD2 via ``save_image``.
+
+        PHD2's event API has no full-frame image; the runtime asks PHD2 to
+        write the current guide frame as a FITS into the shared
+        ``guide_image`` folder every few seconds, and this endpoint renders
+        the newest of those. Falls back to a 404 -- never to the main camera's
+        share frame -- when no dump has landed yet.
+        """
+        rt = runtime()
+        field = rt.guide_field
+        if not field or not field.get("path"):
+            raise HTTPException(status_code=404, detail="no guide frame has been saved yet")
+        options = StretchOptions(
+            max_width=width,
+            target_background=background,
+            white_percentile=white,
+        )
+        try:
+            image = await asyncio.to_thread(
+                rt.previewer.render, Path(field["path"]), field["mtime"], options
+            )
+        except PreviewError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - a torn FITS must not 500
+            raise HTTPException(status_code=404, detail=f"{type(exc).__name__}: {exc}") from exc
+        return Response(
+            content=image.png,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Guide-Frame": str(image.meta.get("filename") or ""),
             },
         )
 
